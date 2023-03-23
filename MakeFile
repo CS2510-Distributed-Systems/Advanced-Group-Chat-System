@@ -1,0 +1,15 @@
+CHAT_DIR = chat-system
+
+gen:
+	protoc --proto_path=proto proto/*.proto --go_out=. --go-grpc_out=require_unimplemented_servers=false:.
+
+clean:
+	del .\pb
+
+server:
+	go run cmd/server/server_main.go --port=12000
+
+client:
+	go run main.go 
+test:
+	go test -cover  ./...
