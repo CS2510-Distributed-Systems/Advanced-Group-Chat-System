@@ -14,7 +14,7 @@ import (
 // userstore stores the user information on server
 type UserStore interface {
 	SaveUser(user *pb.User) error
-	DeleteUser(User *pb.User)
+	DeleteUser(userID uint32)
 }
 
 // groupstore stores the group information on server
@@ -24,10 +24,10 @@ type GroupStore interface {
 	AppendMessage(appendchat *pb.AppendChat) error
 	LikeMessage(like *pb.LikeMessage) error
 	UnLikeMessage(unlike *pb.UnLikeMessage) error
-	RemoveUser(user *pb.User, groupname string)
+	RemoveUser(userID uint32, groupname string)
 }
 
-//stores the incoming connection so as to braodcast later
+// stores the incoming connection so as to braodcast later
 type ConnStore interface {
 	BroadCast(groupname string, resp *pb.GroupChatResponse) error
 	AddConn(stream pb.ChatService_GroupChatServer, client [2]string)
@@ -135,8 +135,8 @@ func (userstore *InMemoryUserStore) SaveUser(user *pb.User) error {
 }
 
 // deletes a user in the userstore
-func (userstore *InMemoryUserStore) DeleteUser(user *pb.User) {
-	delete(userstore.User, user.Id)
+func (userstore *InMemoryUserStore) DeleteUser(userID uint32) {
+	delete(userstore.User, userID)
 }
 
 // retreives a group info
@@ -255,16 +255,16 @@ func (group_master *InMemoryGroupStore) UnLikeMessage(unlikemessage *pb.UnLikeMe
 }
 
 // when the user left the group, we remove the user from participants of the group
-func (group_master *InMemoryGroupStore) RemoveUser(user *pb.User, groupname string) {
+func (group_master *InMemoryGroupStore) RemoveUser(userID uint32, groupname string) {
 	groupmap := group_master.Group[groupname]
 	if groupmap == nil {
 		return
 	} else if groupmap.Participants == nil {
 		return
-	} else if groupmap.Participants[user.Id] == "" {
+	} else if groupmap.Participants[userID] == "" {
 
 		return
 	}
 
-	delete(group_master.Group[groupname].Participants, user.Id)
+	delete(group_master.Group[groupname].Participants, userID)
 }

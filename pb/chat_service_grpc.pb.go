@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type ChatServiceClient interface {
 	JoinGroup(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error)
 	GroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_GroupChatClient, error)
+	JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error)
 }
 
 type chatServiceClient struct {
@@ -74,12 +75,44 @@ func (x *chatServiceGroupChatClient) Recv() (*GroupChatResponse, error) {
 	return m, nil
 }
 
+func (c *chatServiceClient) JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error) {
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[1], "/chat.ChatService/JoinGroupChat", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &chatServiceJoinGroupChatClient{stream}
+	return x, nil
+}
+
+type ChatService_JoinGroupChatClient interface {
+	Send(*GroupChatRequest) error
+	Recv() (*GroupChatResponse, error)
+	grpc.ClientStream
+}
+
+type chatServiceJoinGroupChatClient struct {
+	grpc.ClientStream
+}
+
+func (x *chatServiceJoinGroupChatClient) Send(m *GroupChatRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *chatServiceJoinGroupChatClient) Recv() (*GroupChatResponse, error) {
+	m := new(GroupChatResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // ChatServiceServer is the server API for ChatService service.
 // All implementations should embed UnimplementedChatServiceServer
 // for forward compatibility
 type ChatServiceServer interface {
 	JoinGroup(context.Context, *JoinRequest) (*JoinResponse, error)
 	GroupChat(ChatService_GroupChatServer) error
+	JoinGroupChat(ChatService_JoinGroupChatServer) error
 }
 
 // UnimplementedChatServiceServer should be embedded to have forward compatible implementations.
@@ -91,6 +124,9 @@ func (UnimplementedChatServiceServer) JoinGroup(context.Context, *JoinRequest) (
 }
 func (UnimplementedChatServiceServer) GroupChat(ChatService_GroupChatServer) error {
 	return status.Errorf(codes.Unimplemented, "method GroupChat not implemented")
+}
+func (UnimplementedChatServiceServer) JoinGroupChat(ChatService_JoinGroupChatServer) error {
+	return status.Errorf(codes.Unimplemented, "method JoinGroupChat not implemented")
 }
 
 // UnsafeChatServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -148,6 +184,32 @@ func (x *chatServiceGroupChatServer) Recv() (*GroupChatRequest, error) {
 	return m, nil
 }
 
+func _ChatService_JoinGroupChat_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ChatServiceServer).JoinGroupChat(&chatServiceJoinGroupChatServer{stream})
+}
+
+type ChatService_JoinGroupChatServer interface {
+	Send(*GroupChatResponse) error
+	Recv() (*GroupChatRequest, error)
+	grpc.ServerStream
+}
+
+type chatServiceJoinGroupChatServer struct {
+	grpc.ServerStream
+}
+
+func (x *chatServiceJoinGroupChatServer) Send(m *GroupChatResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *chatServiceJoinGroupChatServer) Recv() (*GroupChatRequest, error) {
+	m := new(GroupChatRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // ChatService_ServiceDesc is the grpc.ServiceDesc for ChatService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -164,6 +226,12 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "GroupChat",
 			Handler:       _ChatService_GroupChat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "JoinGroupChat",
+			Handler:       _ChatService_JoinGroupChat_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

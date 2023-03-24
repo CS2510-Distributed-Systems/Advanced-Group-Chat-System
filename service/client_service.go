@@ -10,11 +10,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
-	"google.golang.org/grpc/metadata"
 )
 
 // client service
@@ -33,38 +32,35 @@ func NewChatServiceClient(chatservice pb.ChatServiceClient, authservice pb.AuthS
 }
 
 // rpc to send the join request
-func JoinGroup(groupname string, client *ChatServiceClient) error {
-	//adding grouname and userdata to metadata to subscribe to broadcasts.
-	md := metadata.Pairs("groupname", client.clientstore.GetGroup().Groupname, "userid", strconv.Itoa(int(client.clientstore.GetUser().Id)))
-	ctx := metadata.NewOutgoingContext(context.Background(), md)
+// func JoinGroup(groupname string, client *ChatServiceClient) error {
+// 	//adding grouname and userdata to metadata to subscribe to broadcasts.
+// 	md := metadata.Pairs("groupname", client.clientstore.GetGroup().Groupname, "userid", strconv.Itoa(int(client.clientstore.GetUser().Id)))
+// 	ctx := metadata.NewOutgoingContext(context.Background(), md)
 
-	user := client.clientstore.GetUser()
-	group := client.clientstore.GetGroup()
-	if user.Name == "None" {
-		return fmt.Errorf("Please Login")
-	}
-	joinchat := &pb.JoinChat{
-		Newgroup:  groupname,
-		User:      user,
-		Currgroup: group.Groupname,
-	}
+// 	user := client.clientstore.GetUser()
+// 	group := client.clientstore.GetGroup()
+// 	joinchat := &pb.JoinChat{
+// 		Newgroup:  groupname,
+// 		User:      user,
+// 		Currgroup: group.Groupname,
+// 	}
 
-	req := &pb.JoinRequest{
-		Joinchat: joinchat,
-	}
+// 	req := &pb.JoinRequest{
+// 		Joinchat: joinchat,
+// 	}
 
-	res, err := client.chatservice.JoinGroup(ctx, req)
-	if err != nil {
-		return err
-	}
-	//
-	err = client.clientstore.SetGroup(res.GetGroup())
+// 	res, err := client.chatservice.JoinGroup(ctx, req)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	fmt.Printf("joined :%s\n", client.clientstore.GetGroup().Groupname)
+// 	client.clientstore.SetGroup(res.GetGroup())
 
-	return nil
+// 	fmt.Printf("joined :%s\n", client.clientstore.GetGroup().Groupname)
 
-}
+// 	return nil
+
+// }
 
 // login rpc
 func UserLogin(user_name string, client *ChatServiceClient) error {
@@ -78,7 +74,7 @@ func UserLogin(user_name string, client *ChatServiceClient) error {
 
 	_, err := client.authservice.Login(context.Background(), user_details)
 	if err != nil {
-		return fmt.Errorf("Failed to create user: %v", err)
+		return err
 	}
 	client.clientstore.SetUser(user)
 	log.Printf("User %v Logged in succesfully.", client.clientstore.GetUser().Name)
@@ -108,182 +104,258 @@ func UserLogout(client *ChatServiceClient) bool {
 	return resp.Status
 }
 
-var wg = new(sync.WaitGroup)
+// experiment rpc
+func (client *ChatServiceClient) JoinGroupChat() {
+	
 
-// Bi-directional streaming rpc to send and receive the group messages
-func GroupChat(client *ChatServiceClient) error {
-	md := metadata.Pairs("groupname", client.clientstore.GetGroup().Groupname, "userid", strconv.Itoa(int(client.clientstore.GetUser().Id)))
-	ctx := metadata.NewOutgoingContext(context.Background(), md)
-
-	stream, err := client.chatservice.GroupChat(ctx)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := client.chatservice.JoinGroupChat(ctx)
 	if err != nil {
-		return err
+		log.Fatalf("open stream error %v", err)
 	}
-	waitResponse := make(chan error)
-	wg.Add(2)
-	go send(stream, client)
-	//receive stream
-	go func() error {
-		defer log.Println("Receive stream ended")
-		defer wg.Done()
-		for {
-			err := contextError(stream.Context())
-			if err != nil {
-				return err
-			}
-			res, err := stream.Recv()
-			if err == io.EOF {
-				log.Print("no more responses")
 
-				waitResponse <- nil
-				return err
-			}
+	done := make(chan bool)
+
+	//go routine for send
+	go func() error {
+		for {
+			log.Printf("Enter the message in the group:")
+			msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
 			if err != nil {
-				waitResponse <- fmt.Errorf("cannot receive stream response: %v", err)
-				return err
+				log.Fatalf("Cannot read the message, please enter again\n")
 			}
-			command := res.Command
-			if command == "p" {
-				PrintAll(res.Group)
-			} else {
-				PrintRecent(res.Group)
+			//preparing request
+			req, command := client.ProcessMessage(msg)
+
+			if err := stream.Send(req); err != nil {
+				log.Println("Send request error")
 			}
+			if command == "q" {
+				if err := stream.CloseSend(); err != nil {
+					log.Println(err)
+				}
+			}
+			
+
 		}
 	}()
-	wg.Wait()
-	err = <-waitResponse
-	return err
+
+	time.Sleep(2000)
+	//go routine for receive
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			if err == io.EOF {
+				log.Println("EOF error")
+				close(done)
+				return
+			}
+			if err != nil {
+				log.Fatalf("cannot receive %v", err)
+			}
+
+			//process response
+			command := resp.Command
+			if command == "p" {
+				PrintAll(resp.Group)
+			} else {
+				PrintRecent(resp.Group)
+			}
+
+		}
+	}()
+
+	// go routine to close the done channel
+	go func() {
+		<-ctx.Done()
+		if err := ctx.Err(); err != nil {
+			log.Println(err)
+		}
+		// close(done)
+	}()
+
+	<-done
+	log.Println("Streaming Ended from client side")
+
 }
 
-func send(stream pb.ChatService_GroupChatClient, client *ChatServiceClient) error {
-	defer wg.Done()
-	for {
-		log.Printf("Enter the message in the group:")
-		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil {
-			log.Fatalf("Cannot read the message, please enter again\n")
+// Bi-directional streaming rpc to send and receive the group messages
+// func GroupChat(client *ChatServiceClient) error {
+// 	md := metadata.Pairs("groupname", client.clientstore.GetGroup().Groupname,
+// 				"userid", strconv.Itoa(int(client.clientstore.GetUser().Id)))
+// 	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
+// 	stream, err := client.chatservice.GroupChat(ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	waitResponse := make(chan error)
+// 	wg.Add(2)
+// 	go send(stream, client)
+// 	//receive stream
+// 	go func() error {
+// 		defer log.Println("Receive stream ended")
+// 		defer wg.Done()
+// 		for {
+// 			err := contextError(stream.Context())
+// 			if err != nil {
+// 				return err
+// 			}
+// 			res, err := stream.Recv()
+// 			if err == io.EOF {
+// 				log.Print("no more responses")
+
+// 				waitResponse <- nil
+// 				return err
+// 			}
+// 			if err != nil {
+// 				waitResponse <- fmt.Errorf("cannot receive stream response: %v", err)
+// 				return err
+// 			}
+// 			command := res.Command
+// 			if command == "p" {
+// 				PrintAll(res.Group)
+// 			} else {
+// 				PrintRecent(res.Group)
+// 			}
+// 		}
+// 	}()
+// 	wg.Wait()
+// 	err = <-waitResponse
+// 	return err
+// }
+
+// func (client *ChatServiceClient) send(stream pb.ChatService_GroupChatClient, ) error {
+// 	defer wg.Done()
+// 	for {
+// 		log.Printf("Enter the message in the group:")
+// 		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
+// 		if err != nil {
+// 			log.Fatalf("Cannot read the message, please enter again\n")
+// 		}
+
+// 		req  := client.ProcessMessage(msg)
+// 	}
+
+// }
+
+func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatRequest,string) {
+	log.Println("Processing Message..")
+	msg = strings.Trim(msg, "\r\n")
+	args := strings.Split(msg, " ")
+	cmd := strings.TrimSpace(args[0])
+	msg = strings.Join(args[1:], " ")
+
+	req := &pb.GroupChatRequest{}
+
+	switch cmd {
+	case "a":
+		if client.clientstore.GetUser().GetName() == "" {
+			log.Println("Please login to join a group.")
+		} else if client.clientstore.GetGroup().Groupname == "" {
+			log.Println("Please join a group to send a message")
+		} else {
+			//appending a message
+			appendchat := &pb.GroupChatRequest_Append{
+				Append: &pb.AppendChat{
+					Group: client.clientstore.GetGroup(),
+					Chatmessage: &pb.ChatMessage{
+						MessagedBy: client.clientstore.GetUser(),
+						Message:    msg,
+						LikedBy:    make(map[uint32]string, 0),
+					},
+				},
+			}
+			req = &pb.GroupChatRequest{
+				Action: appendchat,
+			}
+			log.Printf("appended a message in the group")
+
 		}
 
-		msg = strings.Trim(msg, "\r\n")
-		args := strings.Split(msg, " ")
-		cmd := strings.TrimSpace(args[0])
-		msg = strings.Join(args[1:], " ")
-		switch cmd {
-
-		case "a":
-			if client.clientstore.GetUser().GetName() == "" {
-				log.Println("Please login to join a group.")
-			} else if client.clientstore.GetGroup().Groupname == "" {
-				log.Println("Please join a group to send a message")
-			} else {
-				//appending a message
-				appendchat := &pb.GroupChatRequest_Append{
-					Append: &pb.AppendChat{
-						Group: client.clientstore.GetGroup(),
-						Chatmessage: &pb.ChatMessage{
-							MessagedBy: client.clientstore.GetUser(),
-							Message:    msg,
-							LikedBy:    make(map[uint32]string, 0),
-						},
-					},
-				}
-				req := &pb.GroupChatRequest{
-					Action: appendchat,
-				}
-				stream.Send(req)
-				log.Printf("appended a message in the group")
-			}
-
-		//like message
-		case "l":
-			if client.clientstore.GetUser().GetName() == "" {
-				log.Println("Please login to join a group.")
-			} else if client.clientstore.GetGroup().Groupname == "" {
-				log.Println("Please join a group to send a message")
-			} else {
-				messagenumber, err := strconv.ParseUint(msg, 10, 32)
-				if err != nil {
-					log.Printf("please provide a valid number to like")
-					continue
-				}
-				likemessage := &pb.GroupChatRequest_Like{
-					Like: &pb.LikeMessage{
-						User:      client.clientstore.GetUser(),
-						Messageid: uint32(messagenumber),
-						Group:     client.clientstore.GetGroup(),
-					},
-				}
-				req := &pb.GroupChatRequest{
-					Action: likemessage,
-				}
-				stream.Send(req)
-			}
-
-		case "r":
+	//like message
+	case "l":
+		if client.clientstore.GetUser().GetName() == "" {
+			log.Println("Please login to join a group.")
+		} else if client.clientstore.GetGroup().Groupname == "" {
+			log.Println("Please join a group to send a message")
+		} else {
 			messagenumber, err := strconv.ParseUint(msg, 10, 32)
 			if err != nil {
-				log.Printf("please provide a valid number to unlike")
+				log.Printf("please provide a valid number to like")
 			}
-			unlikemessage := &pb.GroupChatRequest_Unlike{
-				Unlike: &pb.UnLikeMessage{
+			likemessage := &pb.GroupChatRequest_Like{
+				Like: &pb.LikeMessage{
 					User:      client.clientstore.GetUser(),
 					Messageid: uint32(messagenumber),
 					Group:     client.clientstore.GetGroup(),
 				},
 			}
-			req := &pb.GroupChatRequest{
-				Action: unlikemessage,
-			}
-			stream.Send(req)
-
-		case "p":
-			{
-				print := &pb.GroupChatRequest_Print{
-					Print: &pb.PrintChat{
-						User:      client.clientstore.GetUser(),
-						Groupname: client.clientstore.GetGroup().Groupname,
-					},
-				}
-				req := &pb.GroupChatRequest{
-					Action: print,
-				}
-				stream.Send(req)
+			req = &pb.GroupChatRequest{
+				Action: likemessage,
 			}
 
-		case "j":
-			//join the group
-			groupname := strings.TrimSpace(args[1])
-			if groupname == "" {
-				log.Println("Please provide a valid group name")
-			} else {
-				err = JoinGroup(groupname, client)
-				if err != nil {
-					log.Printf("Failed to join a group: %v", err)
-					continue
-				}
-				GroupChat(client)
-			}
+		}
 
-		//quit the program
-		case "q":
-			logout := &pb.GroupChatRequest_Logout{
-				Logout: &pb.Logout{
-					User: client.clientstore.GetUser(),
+	case "r":
+		messagenumber, err := strconv.ParseUint(msg, 10, 32)
+		if err != nil {
+			log.Printf("please provide a valid number to unlike")
+		}
+		unlikemessage := &pb.GroupChatRequest_Unlike{
+			Unlike: &pb.UnLikeMessage{
+				User:      client.clientstore.GetUser(),
+				Messageid: uint32(messagenumber),
+				Group:     client.clientstore.GetGroup(),
+			},
+		}
+		req = &pb.GroupChatRequest{
+			Action: unlikemessage,
+		}
+
+	case "p":
+		{
+			print := &pb.GroupChatRequest_Print{
+				Print: &pb.PrintChat{
+					User:      client.clientstore.GetUser(),
+					Groupname: client.clientstore.GetGroup().Groupname,
 				},
 			}
-			req := &pb.GroupChatRequest{
-				Action: logout,
+			req = &pb.GroupChatRequest{
+				Action: print,
 			}
-			stream.Send(req)
-			stream.CloseSend()
-			return nil
-
-		default:
-			log.Printf("Cannot read the message, please enter again")
-			continue
 		}
-	}
 
+	case "j":
+		//join the group
+		joinchat := &pb.GroupChatRequest_Joinchat{
+			Joinchat: &pb.JoinChat{
+				User: client.clientstore.GetUser(),
+				Newgroup: msg,
+				Currgroup: client.clientstore.GetGroup().Groupname,
+			},
+		}
+		req = &pb.GroupChatRequest{
+			Action: joinchat,
+		}
+		
+
+	//quit the program
+	case "q":
+		logout := &pb.GroupChatRequest_Logout{
+			Logout: &pb.Logout{
+				User: client.clientstore.GetUser(),
+			},
+		}
+		req = &pb.GroupChatRequest{
+			Action: logout,
+		}
+
+	default:
+		log.Printf("Cannot read the message, please enter again")
+	}
+	return req, cmd
 }
 
 // print only 10 recent messages
