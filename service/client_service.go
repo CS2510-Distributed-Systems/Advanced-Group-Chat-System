@@ -10,7 +10,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
@@ -30,37 +29,6 @@ func NewChatServiceClient(chatservice pb.ChatServiceClient, authservice pb.AuthS
 		clientstore: store,
 	}
 }
-
-// rpc to send the join request
-// func JoinGroup(groupname string, client *ChatServiceClient) error {
-// 	//adding grouname and userdata to metadata to subscribe to broadcasts.
-// 	md := metadata.Pairs("groupname", client.clientstore.GetGroup().Groupname, "userid", strconv.Itoa(int(client.clientstore.GetUser().Id)))
-// 	ctx := metadata.NewOutgoingContext(context.Background(), md)
-
-// 	user := client.clientstore.GetUser()
-// 	group := client.clientstore.GetGroup()
-// 	joinchat := &pb.JoinChat{
-// 		Newgroup:  groupname,
-// 		User:      user,
-// 		Currgroup: group.Groupname,
-// 	}
-
-// 	req := &pb.JoinRequest{
-// 		Joinchat: joinchat,
-// 	}
-
-// 	res, err := client.chatservice.JoinGroup(ctx, req)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	client.clientstore.SetGroup(res.GetGroup())
-
-// 	fmt.Printf("joined :%s\n", client.clientstore.GetGroup().Groupname)
-
-// 	return nil
-
-// }
 
 // login rpc
 func UserLogin(user_name string, client *ChatServiceClient) error {
@@ -106,10 +74,8 @@ func UserLogout(client *ChatServiceClient) bool {
 
 // experiment rpc
 func (client *ChatServiceClient) JoinGroupChat() {
-	
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	stream, err := client.chatservice.JoinGroupChat(ctx)
 	if err != nil {
 		log.Fatalf("open stream error %v", err)
@@ -136,12 +102,10 @@ func (client *ChatServiceClient) JoinGroupChat() {
 					log.Println(err)
 				}
 			}
-			
 
 		}
 	}()
 
-	time.Sleep(2000)
 	//go routine for receive
 	go func() {
 		for {
@@ -180,67 +144,7 @@ func (client *ChatServiceClient) JoinGroupChat() {
 
 }
 
-// Bi-directional streaming rpc to send and receive the group messages
-// func GroupChat(client *ChatServiceClient) error {
-// 	md := metadata.Pairs("groupname", client.clientstore.GetGroup().Groupname,
-// 				"userid", strconv.Itoa(int(client.clientstore.GetUser().Id)))
-// 	ctx := metadata.NewOutgoingContext(context.Background(), md)
-
-// 	stream, err := client.chatservice.GroupChat(ctx)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	waitResponse := make(chan error)
-// 	wg.Add(2)
-// 	go send(stream, client)
-// 	//receive stream
-// 	go func() error {
-// 		defer log.Println("Receive stream ended")
-// 		defer wg.Done()
-// 		for {
-// 			err := contextError(stream.Context())
-// 			if err != nil {
-// 				return err
-// 			}
-// 			res, err := stream.Recv()
-// 			if err == io.EOF {
-// 				log.Print("no more responses")
-
-// 				waitResponse <- nil
-// 				return err
-// 			}
-// 			if err != nil {
-// 				waitResponse <- fmt.Errorf("cannot receive stream response: %v", err)
-// 				return err
-// 			}
-// 			command := res.Command
-// 			if command == "p" {
-// 				PrintAll(res.Group)
-// 			} else {
-// 				PrintRecent(res.Group)
-// 			}
-// 		}
-// 	}()
-// 	wg.Wait()
-// 	err = <-waitResponse
-// 	return err
-// }
-
-// func (client *ChatServiceClient) send(stream pb.ChatService_GroupChatClient, ) error {
-// 	defer wg.Done()
-// 	for {
-// 		log.Printf("Enter the message in the group:")
-// 		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
-// 		if err != nil {
-// 			log.Fatalf("Cannot read the message, please enter again\n")
-// 		}
-
-// 		req  := client.ProcessMessage(msg)
-// 	}
-
-// }
-
-func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatRequest,string) {
+func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatRequest, string) {
 	log.Println("Processing Message..")
 	msg = strings.Trim(msg, "\r\n")
 	args := strings.Split(msg, " ")
@@ -331,15 +235,14 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 		//join the group
 		joinchat := &pb.GroupChatRequest_Joinchat{
 			Joinchat: &pb.JoinChat{
-				User: client.clientstore.GetUser(),
-				Newgroup: msg,
+				User:      client.clientstore.GetUser(),
+				Newgroup:  msg,
 				Currgroup: client.clientstore.GetGroup().Groupname,
 			},
 		}
 		req = &pb.GroupChatRequest{
 			Action: joinchat,
 		}
-		
 
 	//quit the program
 	case "q":
