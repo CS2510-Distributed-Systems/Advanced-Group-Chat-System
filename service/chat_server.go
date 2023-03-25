@@ -7,6 +7,10 @@ import (
 	"log"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+
+	// "google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // chat service
@@ -55,57 +59,50 @@ func (s *ChatServiceServer) Logout(ctx context.Context, req *pb.LogoutRequest) (
 func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatServer) error {
 	log.Println("Received Join Group Request")
 
-	ctx := stream.Context()
-
-	go func() error {
-		for {
-
-			//exit if context is done
-			select {
-			case <-ctx.Done():
-				log.Println("Context Error")
-				return ctx.Err()
-			default:
-			}
-
-			//receive data
-			req, err := stream.Recv()
-			if err == io.EOF {
-				log.Println("Stream Ended in the server side")
-				return nil
-			}
-			if err != nil {
-				log.Println("Error in Receive.")
-				continue
-			}
-
-			//processing received request
-			groupname, command := s.ProcessRequest(req)
-
-			//adding the new client
-			if command == "j" {
-				user := req.GetJoinchat().User
-				//add the requested stream
-				newclient := [2]string{groupname, user.Name}
-				s.clients.AddConn(stream, newclient)
-			}
-
-			//prepare a response
-			resp := &pb.GroupChatResponse{
-				Group:   s.groupstore.GetGroup(groupname),
-				Command: command,
-			}
-
-			//braodcast to clients who are in same group
-			s.clients.BroadCast(groupname, resp)
-			if err := stream.Send(resp); err != nil {
-				log.Printf("send error %v", err)
-			}
-
+	for {
+		err := contextError(stream.Context())
+		if err != nil {
+			return err
 		}
-	}()
 
-	return nil
+		//receive data
+		log.Println("Trying to receive data")
+		req, err := stream.Recv()
+		if err == io.EOF {
+			log.Println("Stream Ended in the server side")
+			return err
+		}
+		if err != nil {
+			log.Println("Error in Receive.")
+			return err
+		}
+		log.Println("Tried to receive data.Didnt possible")
+
+		//processing received request
+		groupname, command := s.ProcessRequest(req)
+
+		//adding the new client
+		if command == "j" {
+			user := req.GetJoinchat().User
+
+			//store the stream details
+			newclient := [2]string{groupname, user.Name}
+			s.clients.AddConn(stream, newclient)
+		}
+
+		//prepare a response
+		resp := &pb.GroupChatResponse{
+			Group:   s.groupstore.GetGroup(groupname),
+			Command: command,
+		}
+
+		//braodcast to clients who are in same group
+		// s.clients.BroadCast(groupname, resp)
+		if err := stream.Send(resp); err != nil {
+			log.Printf("send error %v", err)
+		}
+
+	}
 
 }
 
@@ -162,11 +159,21 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 		user := req.GetJoinchat().User
 		currgroupname := req.GetJoinchat().Currgroup
 		newgroupname := req.GetJoinchat().Newgroup
-		// currclient := [2]string{currgroupname, user.Name}
+		currclient := [2]string{currgroupname, user.Name}
+
 		//remove the current client stream
-		// s.clients.RemoveConn(currclient)
-		//remove the current client group from store
+		s.clients.RemoveConn(currclient)
+
+		//remove the user from the current group
 		s.groupstore.RemoveUser(user.Id, currgroupname)
+
+		// join a group
+		_, err := s.groupstore.JoinGroup(newgroupname, user)
+		if err != nil {
+			log.Printf("Failed to join group %v", err)
+		}
+		log.Printf("Joined group %s",newgroupname)
+		
 		return newgroupname, command
 
 	default:
@@ -176,22 +183,20 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 	return "", ""
 }
 
+func contextError(ctx context.Context) error {
+	switch ctx.Err() {
+	case context.Canceled:
+		return logError(status.Error(codes.Canceled, "request is canceled"))
+	case context.DeadlineExceeded:
+		return logError(status.Error(codes.DeadlineExceeded, "deadline is exceeded"))
+	default:
+		return nil
+	}
+}
 
-
-// func contextError(ctx context.Context) error {
-// 	switch ctx.Err() {
-// 	case context.Canceled:
-// 		return logError(status.Error(codes.Canceled, "request is canceled"))
-// 	case context.DeadlineExceeded:
-// 		return logError(status.Error(codes.DeadlineExceeded, "deadline is exceeded"))
-// 	default:
-// 		return nil
-// 	}
-// }
-
-// func logError(err error) error {
-// 	if err != nil {
-// 		log.Print(err)
-// 	}
-// 	return err
-// }
+func logError(err error) error {
+	if err != nil {
+		log.Print(err)
+	}
+	return err
+}

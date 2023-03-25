@@ -14,7 +14,7 @@ import (
 
 func main() {
 	// Process commandline arguments
-	address := flag.String("Address", "0.0.0.0", "server address")
+	address := flag.String("Address", "localhost", "server address")
 	portArg := flag.Int("port", 12000, "the server port")
 	flag.Parse()
 	port := *portArg

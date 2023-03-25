@@ -1,6 +1,7 @@
 package service
 
 import (
+	// "bufio"
 	"bufio"
 	"chat-system/pb"
 	"context"
@@ -8,8 +9,12 @@ import (
 	"io"
 	"log"
 	"os"
+
+	// "os"
 	"strconv"
 	"strings"
+
+	// "time"
 
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
@@ -73,18 +78,24 @@ func UserLogout(client *ChatServiceClient) bool {
 }
 
 // experiment rpc
-func (client *ChatServiceClient) JoinGroupChat() {
+func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 
 	ctx := context.Background()
+
 	stream, err := client.chatservice.JoinGroupChat(ctx)
 	if err != nil {
 		log.Fatalf("open stream error %v", err)
 	}
 
 	done := make(chan bool)
+	req1, _ := client.ProcessMessage(mesg)
+	if err := stream.Send(req1); err != nil {
+		log.Println("Send request error")
+		return
+	}
 
 	//go routine for send
-	go func() error {
+	go func() {
 		for {
 			log.Printf("Enter the message in the group:")
 			msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
@@ -121,22 +132,18 @@ func (client *ChatServiceClient) JoinGroupChat() {
 
 			//process response
 			command := resp.Command
+			if command == "j"{
+				_ = client.clientstore.SetGroup(resp.GetGroup())
+				fmt.Printf("joined :%s\n", client.clientstore.GetGroup().Groupname)
+			}
+
 			if command == "p" {
 				PrintAll(resp.Group)
-			} else {
+			} else  {
 				PrintRecent(resp.Group)
 			}
 
 		}
-	}()
-
-	// go routine to close the done channel
-	go func() {
-		<-ctx.Done()
-		if err := ctx.Err(); err != nil {
-			log.Println(err)
-		}
-		// close(done)
 	}()
 
 	<-done
@@ -151,7 +158,7 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 	cmd := strings.TrimSpace(args[0])
 	msg = strings.Join(args[1:], " ")
 
-	req := &pb.GroupChatRequest{}
+	// req := &pb.GroupChatRequest{}
 
 	switch cmd {
 	case "a":
@@ -171,10 +178,11 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 					},
 				},
 			}
-			req = &pb.GroupChatRequest{
+			req := &pb.GroupChatRequest{
 				Action: appendchat,
 			}
 			log.Printf("appended a message in the group")
+			return req, cmd
 
 		}
 
@@ -196,9 +204,10 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 					Group:     client.clientstore.GetGroup(),
 				},
 			}
-			req = &pb.GroupChatRequest{
+			req := &pb.GroupChatRequest{
 				Action: likemessage,
 			}
+			return req, cmd
 
 		}
 
@@ -214,9 +223,10 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 				Group:     client.clientstore.GetGroup(),
 			},
 		}
-		req = &pb.GroupChatRequest{
+		req := &pb.GroupChatRequest{
 			Action: unlikemessage,
 		}
+		return req, cmd
 
 	case "p":
 		{
@@ -226,23 +236,30 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 					Groupname: client.clientstore.GetGroup().Groupname,
 				},
 			}
-			req = &pb.GroupChatRequest{
+			req := &pb.GroupChatRequest{
 				Action: print,
 			}
+			return req, cmd
 		}
 
 	case "j":
 		//join the group
+		log.Println("Joining the group and starting the stream")
+		currgroup := "None"
+		if client.clientstore.GetGroup().GroupID != 0 {
+			currgroup = client.clientstore.GetGroup().Groupname
+		}
 		joinchat := &pb.GroupChatRequest_Joinchat{
 			Joinchat: &pb.JoinChat{
 				User:      client.clientstore.GetUser(),
 				Newgroup:  msg,
-				Currgroup: client.clientstore.GetGroup().Groupname,
+				Currgroup: currgroup,
 			},
 		}
-		req = &pb.GroupChatRequest{
+		req := &pb.GroupChatRequest{
 			Action: joinchat,
 		}
+		return req, cmd
 
 	//quit the program
 	case "q":
@@ -251,14 +268,17 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 				User: client.clientstore.GetUser(),
 			},
 		}
-		req = &pb.GroupChatRequest{
+		req := &pb.GroupChatRequest{
 			Action: logout,
 		}
+		return req, cmd
 
 	default:
 		log.Printf("Cannot read the message, please enter again")
+
 	}
-	return req, cmd
+	return &pb.GroupChatRequest{}, cmd
+
 }
 
 // print only 10 recent messages

@@ -1,21 +1,17 @@
 package main
 
 import (
-	"bufio"
+	// "bufio"
 	client "chat-system/cmd/client"
 	"log"
-	"os"
+	// "os"
 	"strings"
 )
 
 func main() {
 	log.Println("Please specify server address to connect: ")
 	for {
-		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil {
-			log.Println("Error while reading command. Please try again.")
-		}
-		msg = strings.Trim(msg, "\r\n")
+		msg := "c localhost:12000"
 		argument := strings.Split(msg, " ")
 		command := argument[0]
 		address := ""

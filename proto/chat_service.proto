@@ -27,7 +27,6 @@ message GroupChatResponse { Group group = 1; string command=2; }
 
 service ChatService {
   rpc JoinGroup(JoinRequest) returns (JoinResponse) {};
-  rpc GroupChat(stream GroupChatRequest) returns (stream GroupChatResponse) {};
   rpc JoinGroupChat(stream GroupChatRequest) returns (stream GroupChatResponse) {};
 
 }

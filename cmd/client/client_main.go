@@ -58,7 +58,6 @@ func CallClient(server_address string, port string) error {
 					return nil
 				}
 			}
-			chatclient.JoinGroupChat()
 
 		case "j":
 			if clientstore.GetUser().GetName() == "" {
@@ -68,12 +67,8 @@ func CallClient(server_address string, port string) error {
 				groupname := strings.TrimSpace(arg)
 				if groupname == "" {
 					log.Println("Please provide a valid group name")
-				} else {
-					// service.JoinGroup(groupname, chatclient)
-					// //start streaming
-					// service.GroupChat(chatclient)
-					
 				}
+				chatclient.JoinGroupChat(msg)
 
 			}
 		case "a", "l", "r":

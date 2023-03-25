@@ -23,7 +23,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatServiceClient interface {
 	JoinGroup(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error)
-	GroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_GroupChatClient, error)
+	// rpc GroupChat(stream GroupChatRequest) returns (stream GroupChatResponse) {};
 	JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error)
 }
 
@@ -44,39 +44,8 @@ func (c *chatServiceClient) JoinGroup(ctx context.Context, in *JoinRequest, opts
 	return out, nil
 }
 
-func (c *chatServiceClient) GroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_GroupChatClient, error) {
-	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], "/chat.ChatService/GroupChat", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &chatServiceGroupChatClient{stream}
-	return x, nil
-}
-
-type ChatService_GroupChatClient interface {
-	Send(*GroupChatRequest) error
-	Recv() (*GroupChatResponse, error)
-	grpc.ClientStream
-}
-
-type chatServiceGroupChatClient struct {
-	grpc.ClientStream
-}
-
-func (x *chatServiceGroupChatClient) Send(m *GroupChatRequest) error {
-	return x.ClientStream.SendMsg(m)
-}
-
-func (x *chatServiceGroupChatClient) Recv() (*GroupChatResponse, error) {
-	m := new(GroupChatResponse)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 func (c *chatServiceClient) JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error) {
-	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[1], "/chat.ChatService/JoinGroupChat", opts...)
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], "/chat.ChatService/JoinGroupChat", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +80,7 @@ func (x *chatServiceJoinGroupChatClient) Recv() (*GroupChatResponse, error) {
 // for forward compatibility
 type ChatServiceServer interface {
 	JoinGroup(context.Context, *JoinRequest) (*JoinResponse, error)
-	GroupChat(ChatService_GroupChatServer) error
+	// rpc GroupChat(stream GroupChatRequest) returns (stream GroupChatResponse) {};
 	JoinGroupChat(ChatService_JoinGroupChatServer) error
 }
 
@@ -121,9 +90,6 @@ type UnimplementedChatServiceServer struct {
 
 func (UnimplementedChatServiceServer) JoinGroup(context.Context, *JoinRequest) (*JoinResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method JoinGroup not implemented")
-}
-func (UnimplementedChatServiceServer) GroupChat(ChatService_GroupChatServer) error {
-	return status.Errorf(codes.Unimplemented, "method GroupChat not implemented")
 }
 func (UnimplementedChatServiceServer) JoinGroupChat(ChatService_JoinGroupChatServer) error {
 	return status.Errorf(codes.Unimplemented, "method JoinGroupChat not implemented")
@@ -156,32 +122,6 @@ func _ChatService_JoinGroup_Handler(srv interface{}, ctx context.Context, dec fu
 		return srv.(ChatServiceServer).JoinGroup(ctx, req.(*JoinRequest))
 	}
 	return interceptor(ctx, in, info, handler)
-}
-
-func _ChatService_GroupChat_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ChatServiceServer).GroupChat(&chatServiceGroupChatServer{stream})
-}
-
-type ChatService_GroupChatServer interface {
-	Send(*GroupChatResponse) error
-	Recv() (*GroupChatRequest, error)
-	grpc.ServerStream
-}
-
-type chatServiceGroupChatServer struct {
-	grpc.ServerStream
-}
-
-func (x *chatServiceGroupChatServer) Send(m *GroupChatResponse) error {
-	return x.ServerStream.SendMsg(m)
-}
-
-func (x *chatServiceGroupChatServer) Recv() (*GroupChatRequest, error) {
-	m := new(GroupChatRequest)
-	if err := x.ServerStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
 }
 
 func _ChatService_JoinGroupChat_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -223,12 +163,6 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "GroupChat",
-			Handler:       _ChatService_GroupChat_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
 		{
 			StreamName:    "JoinGroupChat",
 			Handler:       _ChatService_JoinGroupChat_Handler,

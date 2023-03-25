@@ -30,13 +30,13 @@ type GroupStore interface {
 // stores the incoming connection so as to braodcast later
 type ConnStore interface {
 	BroadCast(groupname string, resp *pb.GroupChatResponse) error
-	AddConn(stream pb.ChatService_GroupChatServer, client [2]string)
+	AddConn(stream pb.ChatService_JoinGroupChatServer, client [2]string)
 	RemoveConn(client [2]string)
 }
 
 type InMemoryConnStore struct {
 	mutex   sync.RWMutex
-	clients map[pb.ChatService_GroupChatServer][2]string
+	clients map[pb.ChatService_JoinGroupChatServer][2]string
 }
 
 type InMemoryUserStore struct {
@@ -51,7 +51,7 @@ type InMemoryGroupStore struct {
 
 func NewInMemoryConnStore() *InMemoryConnStore {
 	return &InMemoryConnStore{
-		clients: make(map[pb.ChatService_GroupChatServer][2]string),
+		clients: make(map[pb.ChatService_JoinGroupChatServer][2]string),
 	}
 }
 
@@ -86,11 +86,11 @@ func (conn *InMemoryConnStore) BroadCast(groupname string, res *pb.GroupChatResp
 }
 
 // adds an incoming conn in the server connstore
-func (conn *InMemoryConnStore) AddConn(stream pb.ChatService_GroupChatServer, client [2]string) {
+func (conn *InMemoryConnStore) AddConn(stream pb.ChatService_JoinGroupChatServer, client [2]string) {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 	if conn.clients == nil {
-		conn.clients = make(map[pb.ChatService_GroupChatServer][2]string)
+		conn.clients = make(map[pb.ChatService_JoinGroupChatServer][2]string)
 	}
 	currclient, found := conn.clients[stream]
 	if found && currclient == client {
