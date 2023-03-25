@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	// "time"
 
 	"chat-system/pb"
 	"chat-system/service"
@@ -19,6 +21,7 @@ import (
 // client
 func CallClient(server_address string, port string) error {
 	log.Printf("Dialing to server %s:%v", server_address, port)
+	
 
 	// Connect to RPC server
 	transportOption := grpc.WithTransportCredentials(insecure.NewCredentials())
@@ -32,14 +35,24 @@ func CallClient(server_address string, port string) error {
 	log.Printf("Target : %v :%v ", conn.GetState(), conn.Target())
 	clientstore := service.NewInMemoryClientStore()
 	chatclient := service.NewChatServiceClient(pb.NewChatServiceClient(conn), pb.NewAuthServiceClient(conn), clientstore)
+	
+	//Handling client crashing 
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		chatclient.UserLogout()
+		os.Exit(1)
+	}()
 
 	for {
 		//read input
 		log.Printf("Enter the message:")
 		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
-			log.Fatalf("Cannot read the message, please enter again\n")
+			log.Println("Client crashed. Performing graceful shutdown")
 		}
+		
 
 		//parsing input
 		msg = strings.Trim(msg, "\r\n")

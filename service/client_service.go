@@ -99,32 +99,6 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 		log.Println("Send request error")
 		return
 	}
-
-	//go routine for send
-	go func() {
-		for {
-			log.Printf("Enter the message in the group:")
-			msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
-			if err != nil {
-				log.Fatalf("Cannot read the message, please enter again\n")
-			}
-			//preparing request
-			req, command := client.ProcessMessage(msg)
-			if command == "q" {
-				if err := stream.CloseSend(); err != nil {
-					log.Println(err)
-				}
-				close(done)
-				return
-			}
-			if err := stream.Send(req); err != nil {
-				log.Println("Send request error")
-			}
-			
-
-		}
-	}()
-
 	//go routine for receive
 	go func() {
 		for {
@@ -142,13 +116,40 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 			command := resp.Command
 			if command == "j" {
 				_ = client.clientstore.SetGroup(resp.GetGroup())
-				fmt.Printf("joined :%s\n", client.clientstore.GetGroup().Groupname)
 			}
 
 			if command == "p" {
 				PrintAll(resp.Group)
 			} else {
 				PrintRecent(resp.Group)
+			}
+
+		}
+	}()
+
+	//go routine for send
+	go func() {
+		for {
+			log.Printf("Enter the message in the group:")
+			msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			if err != nil {
+				log.Println("Client crashed inside the stream. Performing graceful shutdown")
+				return
+			} else {
+				log.Println("Logout Error.")
+			}
+
+			//preparing request
+			req, command := client.ProcessMessage(msg)
+			if command == "q" {
+				if err := stream.CloseSend(); err != nil {
+					log.Println(err)
+				}
+				close(done)
+				return
+			}
+			if err := stream.Send(req); err != nil {
+				log.Println("Send request error")
 			}
 
 		}

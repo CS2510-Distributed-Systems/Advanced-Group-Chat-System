@@ -57,12 +57,17 @@ func (s *ChatServiceServer) Logout(ctx context.Context, req *pb.LogoutRequest) (
 	if groupname != "" {
 		s.groupstore.RemoveUser(userID, groupname)
 		log.Printf("Removed %v from %v group", username, groupname)
+		currclient := [2]string{groupname, username}
 
+		//remove the current client stream
+		s.clients.RemoveConn(currclient)
+		
 		//braodcast the change
 		broadcastresp := &pb.GroupChatResponse{
 			Group:   s.groupstore.GetGroup(groupname),
 			Command: "q",
 		}
+
 		s.clients.BroadCast(groupname, broadcastresp)
 	}
 	resp := &pb.LogoutResponse{
