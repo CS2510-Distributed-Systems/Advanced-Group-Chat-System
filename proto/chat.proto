@@ -10,7 +10,7 @@ message ChatMessage {
   User messaged_by =1;
   string message = 2;
   //liked users map 
-  map<uint32, string> liked_by = 4;
+  map<string, string> liked_by = 4;
 }
 
 message Group {

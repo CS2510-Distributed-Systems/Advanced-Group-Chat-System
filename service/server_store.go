@@ -177,7 +177,7 @@ func (group_master *InMemoryGroupStore) AppendMessage(appendchat *pb.AppendChat)
 	chatmessage := &pb.ChatMessage{
 		MessagedBy: appendchat.Chatmessage.MessagedBy,
 		Message:    appendchat.Chatmessage.Message,
-		LikedBy:    make(map[uint32]string),
+		LikedBy:    make(map[string]string),
 	}
 	log.Printf("chatmessage arrived is %v", chatmessage)
 	//get group and messagenumber
@@ -207,16 +207,16 @@ func (group_master *InMemoryGroupStore) LikeMessage(likemessage *pb.LikeMessage)
 	}
 	log.Printf("getting the message : %v", message)
 	//like it only if he is not the sender of the message
-	if message.MessagedBy.Id == likeduser.Id {
+	if message.MessagedBy.Name == likeduser.Name {
 		return fmt.Errorf("cannot like you own message")
 	}
 	//check if the like is already present
-	user, found := message.LikedBy[likeduser.GetId()]
+	username, found := message.LikedBy[likeduser.GetName()]
 	if found {
 		return fmt.Errorf("message already liked")
 	}
 	//like
-	message.LikedBy[likeduser.GetId()] = user
+	message.LikedBy[likeduser.GetName()] = username
 
 	log.Printf("message liked")
 	return nil
@@ -237,17 +237,17 @@ func (group_master *InMemoryGroupStore) UnLikeMessage(unlikemessage *pb.UnLikeMe
 	if !found {
 		return fmt.Errorf("please enter valid message")
 	}
-	//like it only if he is not the sender of the message
-	if message.MessagedBy.Id == unlikeduser.Id {
+	//unlike it only if he is not the sender of the message
+	if message.MessagedBy.Name == unlikeduser.Name {
 		return fmt.Errorf("cannot unlike you own message")
 	}
 	//check if the like is present
-	username, found := message.LikedBy[unlikeduser.GetId()]
+	username, found := message.LikedBy[unlikeduser.GetName()]
 	if !found {
 		return fmt.Errorf("message never liked")
 	}
 	//unlike
-	delete(message.LikedBy, unlikeduser.GetId())
+	delete(message.LikedBy, unlikeduser.GetName())
 
 	log.Printf("user %s unliked a message", username)
 	return nil

@@ -180,7 +180,7 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 					Chatmessage: &pb.ChatMessage{
 						MessagedBy: client.clientstore.GetUser(),
 						Message:    msg,
-						LikedBy:    make(map[uint32]string, 0),
+						LikedBy:    make(map[string]string, 0),
 					},
 				},
 			}
