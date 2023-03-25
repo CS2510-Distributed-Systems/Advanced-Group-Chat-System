@@ -57,10 +57,18 @@ func (s *ChatServiceServer) Logout(ctx context.Context, req *pb.LogoutRequest) (
 	if groupname != "" {
 		s.groupstore.RemoveUser(userID, groupname)
 		log.Printf("Removed %v from %v group", username, groupname)
+
+		//braodcast the change
+		broadcastresp := &pb.GroupChatResponse{
+			Group:   s.groupstore.GetGroup(groupname),
+			Command: "q",
+		}
+		s.clients.BroadCast(groupname, broadcastresp)
 	}
 	resp := &pb.LogoutResponse{
 		Status: true,
 	}
+
 	log.Printf("Removed %v from active-users", username)
 	return resp, nil
 }
@@ -105,8 +113,8 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 			Command: command,
 		}
 
-		//braodcast to clients who are in same group
-		// s.clients.BroadCast(groupname, resp)
+		//braodcast the change
+		s.clients.BroadCast(groupname, resp)
 		if err := stream.Send(resp); err != nil {
 			log.Printf("send error %v", err)
 		}

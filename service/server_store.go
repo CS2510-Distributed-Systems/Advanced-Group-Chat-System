@@ -70,18 +70,17 @@ func NewInMemoryGroupStore() *InMemoryGroupStore {
 
 // Broadcasts the respecitve group infos to the connected clients
 func (conn *InMemoryConnStore) BroadCast(groupname string, res *pb.GroupChatResponse) error {
-	for stream, name := range conn.clients {
-		if name[0] == groupname {
+	for stream, client := range conn.clients {
+		if client[0] == groupname {
 			if stream.Context().Err() == context.Canceled || stream.Context().Err() == context.DeadlineExceeded {
 				delete(conn.clients, stream)
 				continue
 			}
 			stream.Send(res)
-
+			log.Printf("Broadcasted succesfully to %v of %v group", client[1],client[0])
 		}
 	}
 
-	log.Printf("Broadcasted succesfully")
 	return nil
 }
 
