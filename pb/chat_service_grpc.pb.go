@@ -22,8 +22,6 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatServiceClient interface {
-	JoinGroup(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error)
-	// rpc GroupChat(stream GroupChatRequest) returns (stream GroupChatResponse) {};
 	JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error)
 }
 
@@ -33,15 +31,6 @@ type chatServiceClient struct {
 
 func NewChatServiceClient(cc grpc.ClientConnInterface) ChatServiceClient {
 	return &chatServiceClient{cc}
-}
-
-func (c *chatServiceClient) JoinGroup(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error) {
-	out := new(JoinResponse)
-	err := c.cc.Invoke(ctx, "/chat.ChatService/JoinGroup", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *chatServiceClient) JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error) {
@@ -79,8 +68,6 @@ func (x *chatServiceJoinGroupChatClient) Recv() (*GroupChatResponse, error) {
 // All implementations should embed UnimplementedChatServiceServer
 // for forward compatibility
 type ChatServiceServer interface {
-	JoinGroup(context.Context, *JoinRequest) (*JoinResponse, error)
-	// rpc GroupChat(stream GroupChatRequest) returns (stream GroupChatResponse) {};
 	JoinGroupChat(ChatService_JoinGroupChatServer) error
 }
 
@@ -88,9 +75,6 @@ type ChatServiceServer interface {
 type UnimplementedChatServiceServer struct {
 }
 
-func (UnimplementedChatServiceServer) JoinGroup(context.Context, *JoinRequest) (*JoinResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method JoinGroup not implemented")
-}
 func (UnimplementedChatServiceServer) JoinGroupChat(ChatService_JoinGroupChatServer) error {
 	return status.Errorf(codes.Unimplemented, "method JoinGroupChat not implemented")
 }
@@ -104,24 +88,6 @@ type UnsafeChatServiceServer interface {
 
 func RegisterChatServiceServer(s grpc.ServiceRegistrar, srv ChatServiceServer) {
 	s.RegisterService(&ChatService_ServiceDesc, srv)
-}
-
-func _ChatService_JoinGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(JoinRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ChatServiceServer).JoinGroup(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/chat.ChatService/JoinGroup",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ChatServiceServer).JoinGroup(ctx, req.(*JoinRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _ChatService_JoinGroupChat_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -156,12 +122,7 @@ func (x *chatServiceJoinGroupChatServer) Recv() (*GroupChatRequest, error) {
 var ChatService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "chat.ChatService",
 	HandlerType: (*ChatServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "JoinGroup",
-			Handler:    _ChatService_JoinGroup_Handler,
-		},
-	},
+	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "JoinGroupChat",

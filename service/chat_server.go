@@ -18,14 +18,14 @@ type ChatServiceServer struct {
 	pb.UnimplementedChatServiceServer
 	pb.UnimplementedAuthServiceServer
 	groupstore GroupStore
-	UserStore  UserStore
+	userstore  UserStore
 	clients    ConnStore
 }
 
 func NewChatServiceServer(groupstore GroupStore, userstore UserStore, clients ConnStore) *ChatServiceServer {
 	return &ChatServiceServer{
 		groupstore: groupstore,
-		UserStore:  userstore,
+		userstore:  userstore,
 		clients:    clients,
 	}
 }
@@ -37,7 +37,7 @@ func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*p
 		Id:   uuid.New().ID(),
 		Name: user_name,
 	}
-	s.UserStore.SaveUser(newUser)
+	s.userstore.SaveUser(newUser)
 	res := &pb.LoginResponse{
 		User: req.GetUser(),
 	}
@@ -47,11 +47,21 @@ func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*p
 
 // logout rpc
 func (s *ChatServiceServer) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.LogoutResponse, error) {
-	s.UserStore.DeleteUser(req.User.User.Id)
+	username := req.Logout.User.Name
+	userID := req.Logout.User.Id
+	groupname := req.Logout.Groupname
+	//delete user from userlist
+	s.userstore.DeleteUser(userID)
+
+	//delete user from grouplist
+	if groupname != "" {
+		s.groupstore.RemoveUser(userID, groupname)
+		log.Printf("Removed %v from %v group", username, groupname)
+	}
 	resp := &pb.LogoutResponse{
 		Status: true,
 	}
-	log.Println("User deleted")
+	log.Printf("Removed %v from active-users", username)
 	return resp, nil
 }
 
@@ -66,17 +76,16 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 		}
 
 		//receive data
-		log.Println("Trying to receive data")
+		log.Println("stream waiting to receive data....")
 		req, err := stream.Recv()
 		if err == io.EOF {
-			log.Println("Stream Ended in the server side")
+			log.Println("Stream ended in the server side")
 			return err
 		}
 		if err != nil {
 			log.Println("Error in Receive.")
 			return err
 		}
-		log.Println("Tried to receive data.Didnt possible")
 
 		//processing received request
 		groupname, command := s.ProcessRequest(req)
@@ -172,8 +181,8 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 		if err != nil {
 			log.Printf("Failed to join group %v", err)
 		}
-		log.Printf("Joined group %s",newgroupname)
-		
+		log.Printf("Joined group %s", newgroupname)
+
 		return newgroupname, command
 
 	default:

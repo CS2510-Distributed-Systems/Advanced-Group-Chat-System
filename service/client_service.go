@@ -56,11 +56,17 @@ func UserLogin(user_name string, client *ChatServiceClient) error {
 }
 
 // logoutrpc to remove the user from the server
-func UserLogout(client *ChatServiceClient) bool {
+func (client *ChatServiceClient) UserLogout() bool {
 	user := client.clientstore.GetUser()
+	groupname := client.clientstore.GetGroup().Groupname
+
+	if user.Id == 0 {
+		return true
+	}
 	req := &pb.LogoutRequest{
-		User: &pb.Logout{
-			User: user,
+		Logout: &pb.Logout{
+			User:      user,
+			Groupname: groupname,
 		},
 	}
 	resp, err := client.authservice.Logout(context.Background(), req)
@@ -73,7 +79,7 @@ func UserLogout(client *ChatServiceClient) bool {
 			Id:   0,
 		},
 	)
-	log.Printf("User %v Logged out succesfully.", user.Name)
+	log.Printf("User %v Logged out from server succesfully.", user.Name)
 	return resp.Status
 }
 
@@ -104,15 +110,17 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 			}
 			//preparing request
 			req, command := client.ProcessMessage(msg)
-
-			if err := stream.Send(req); err != nil {
-				log.Println("Send request error")
-			}
 			if command == "q" {
 				if err := stream.CloseSend(); err != nil {
 					log.Println(err)
 				}
+				close(done)
+				return
 			}
+			if err := stream.Send(req); err != nil {
+				log.Println("Send request error")
+			}
+			
 
 		}
 	}()
@@ -127,19 +135,19 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 				return
 			}
 			if err != nil {
-				log.Fatalf("cannot receive %v", err)
+				return
 			}
 
 			//process response
 			command := resp.Command
-			if command == "j"{
+			if command == "j" {
 				_ = client.clientstore.SetGroup(resp.GetGroup())
 				fmt.Printf("joined :%s\n", client.clientstore.GetGroup().Groupname)
 			}
 
 			if command == "p" {
 				PrintAll(resp.Group)
-			} else  {
+			} else {
 				PrintRecent(resp.Group)
 			}
 
@@ -157,8 +165,6 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 	args := strings.Split(msg, " ")
 	cmd := strings.TrimSpace(args[0])
 	msg = strings.Join(args[1:], " ")
-
-	// req := &pb.GroupChatRequest{}
 
 	switch cmd {
 	case "a":
@@ -263,14 +269,8 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 
 	//quit the program
 	case "q":
-		logout := &pb.GroupChatRequest_Logout{
-			Logout: &pb.Logout{
-				User: client.clientstore.GetUser(),
-			},
-		}
-		req := &pb.GroupChatRequest{
-			Action: logout,
-		}
+		client.UserLogout()
+		req := &pb.GroupChatRequest{}
 		return req, cmd
 
 	default:

@@ -40,6 +40,7 @@ func CallClient(server_address string, port string) error {
 		if err != nil {
 			log.Fatalf("Cannot read the message, please enter again\n")
 		}
+
 		//parsing input
 		msg = strings.Trim(msg, "\r\n")
 		args := strings.Split(msg, " ")
@@ -69,26 +70,19 @@ func CallClient(server_address string, port string) error {
 					log.Println("Please provide a valid group name")
 				}
 				chatclient.JoinGroupChat(msg)
+				return nil
 
 			}
 		case "a", "l", "r":
 			log.Println("please Enter the chat group to perform chat operations")
 
 		case "q":
-			if clientstore.GetUser().Name != "" {
-				resp := service.UserLogout(chatclient)
-				if resp {
-					conn.Close()
-
-					log.Println("closed localhost:12000 connection. Please enter address again to connect")
-					return nil
-				} else {
-					log.Println("Failed to exit program. Please try again.")
-				}
-			} else {
+			if chatclient.UserLogout(){
+				log.Println("Connection closed.")
 				conn.Close()
-				log.Println("closed localhost:12000 connection.  Please enter address again to connect")
 				return nil
+			}else{
+				log.Println("Logout Error.")
 			}
 
 		default:

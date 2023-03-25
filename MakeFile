@@ -10,6 +10,6 @@ server:
 	go run cmd/server/server_main.go --port=12000
 
 client:
-	go run main.go localhost:12000
+	go run main.go 
 test:
 	go test -cover  ./...
