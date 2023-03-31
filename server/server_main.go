@@ -1,16 +1,9 @@
 package main
 
 import (
-	"chat-system/pb"
-	"chat-system/raft"
-	"chat-system/service"
+	"chat-system/server/raft"
 	"flag"
-	"fmt"
-	"log"
-	"net"
 	"strconv"
-
-	"google.golang.org/grpc"
 )
 
 // func main() {
@@ -47,22 +40,22 @@ import (
 
 func main() {
 	//commandline for the server ID
-	Id := flag.String("id","0","server ID" )
+	Id := flag.String("id", "0", "server ID")
 	flag.Parse()
-	serverId,_ := strconv.Atoi(*Id)
+	serverId, _ := strconv.Atoi(*Id)
 
 	address := "0.0.0.0"
 	port := 12000
-
+	ip := address + ":" + strconv.Itoa(port)
 	//get the peerIds
 	peerIds := make([]int, 0)
-	for p:= 1; p <= 5; p++ {
+	for p := 1; p <= 5; p++ {
 		if p != serverId {
 			peerIds = append(peerIds, p)
 		}
 	}
 	ready := make(chan interface{})
-	
-	server := raft.NewServer(serverId, peerIds,ready )
-	server.Serve()
+
+	server := raft.NewServer(serverId, peerIds, ready)
+	server.Serve(ip)
 }

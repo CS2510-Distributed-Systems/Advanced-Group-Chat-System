@@ -1,4 +1,4 @@
-package service
+package chat_client
 
 import (
 	// "bufio"

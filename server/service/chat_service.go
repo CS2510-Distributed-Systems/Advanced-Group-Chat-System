@@ -1,4 +1,4 @@
-package service
+package chat_server
 
 import (
 	"chat-system/pb"
@@ -61,7 +61,7 @@ func (s *ChatServiceServer) Logout(ctx context.Context, req *pb.LogoutRequest) (
 
 		//remove the current client stream
 		s.clients.RemoveConn(currclient)
-		
+
 		//braodcast the change
 		broadcastresp := &pb.GroupChatResponse{
 			Group:   s.groupstore.GetGroup(groupname),
