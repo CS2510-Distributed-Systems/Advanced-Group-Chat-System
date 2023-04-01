@@ -1,15 +1,22 @@
-CHAT_DIR = chat-system
+all: server/chat_server.go client_main.go
 
 gen:
 	protoc --proto_path=proto proto/*.proto --go_out=. --go-grpc_out=require_unimplemented_servers=false:.
 
+project:
+	go mod init chat-system
+	go mod tidy
+	go mod verify
+
+server: server/chat_server.go
+	go build $<
+
+client: client_main.go
+	go build $<
+
 clean:
-	del .\pb
+	rm go.mod
+	rm go.sum
 
-server:
-	go run cmd/server/server_main.go --port=12000
 
-client:
-	go run main.go 
-test:
-	go test -cover  ./...
+
