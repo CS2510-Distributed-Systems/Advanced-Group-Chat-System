@@ -1,4 +1,4 @@
-all: server/chat_server.go client_main.go
+all: main/server/chat_server.go main/server/client_main.go
 
 gen:
 	protoc --proto_path=proto proto/*.proto --go_out=. --go-grpc_out=require_unimplemented_servers=false:.
@@ -8,10 +8,10 @@ project:
 	go mod tidy
 	go mod verify
 
-server: server/chat_server.go
+server: main/server/chat_server.go
 	go build $<
 
-client: client_main.go
+client: main/client/client_main.go
 	go build $<
 
 clean:
