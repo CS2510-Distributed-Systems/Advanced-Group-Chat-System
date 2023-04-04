@@ -15,22 +15,6 @@ import (
 	"time"
 )
 
-type raftServer interface {
-	Serve(port string)
-	DisconnectAll()
-	shutdown()
-	GetListenAddr() net.Addr
-	ConnectToPeer(peerId int, addr net.Addr) error
-	DisconnectPeer(peerId int) error
-	Call(id int, serviceMethod string, args interface{}, reply interface{}) error
-	StartCluster(n int, port string) error
-	RPCProxyserver
-}
-type RPCProxyserver interface {
-	RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error
-	AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error
-}
-
 type Server struct {
 	mu sync.Mutex
 
@@ -46,40 +30,43 @@ type Server struct {
 	commitChan  chan<- CommitEntry
 	peerClients map[int]*rpc.Client
 
-	ready <-chan interface{}
+	ready <-chan string
 	quit  chan interface{}
 	wg    sync.WaitGroup
 }
 
-func NewServer(serverId int, peerIds []int, ready <-chan interface{}, commitChan chan<- CommitEntry) *Server {
+func NewServer(serverId int, Listener net.Listener) *Server {
 
 	s := new(Server)
 	s.serverId = serverId
-	s.peerIds = peerIds
-	s.peerClients = make(map[int]*rpc.Client)
-	s.ready = ready
-	s.commitChan = commitChan
-	s.quit = make(chan interface{})
-	return s
-}
 
-func (s *Server) Serve(port string) {
-	s.mu.Lock()
+	peerIds := make([]int, 0)
+	for p := 1; p <= 5; p++ {
+		if p != serverId {
+			peerIds = append(peerIds, p)
+		}
+	}
+	s.peerIds = peerIds
+
+	s.commitChan = make(chan CommitEntry, 10)
+	s.peerClients = make(map[int]*rpc.Client)
+	s.ConnectAllPeers(serverId)
+	s.listener = Listener
+
+	s.ready = make(chan string, 1)
+	s.quit = make(chan interface{})
+
 	s.cm = NewConsensusModule(s.serverId, s.peerIds, s, s.ready, s.commitChan)
 
-	//RPC server that forwards all the methods
 	s.rpcServer = rpc.NewServer()
 	s.rpcProxy = &RPCProxy{cm: s.cm}
 	s.rpcServer.RegisterName("ConsensusModule", s.rpcProxy)
 
-	var err error
-	s.listener, err = net.Listen("tcp", port)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("[%v] listening at %s", s.serverId, s.listener.Addr())
-	s.mu.Unlock()
+	return s
+}
 
+func (s *Server) Serve() {
+	log.Printf("[%v] listening at %s", s.serverId, s.listener.Addr())
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -99,7 +86,11 @@ func (s *Server) Serve(port string) {
 				s.rpcServer.ServeConn(conn)
 				s.wg.Done()
 			}()
+
 		}
+		a := "1"
+		a = <-s.ready
+
 	}()
 }
 
@@ -129,14 +120,15 @@ func (s *Server) GetListenAddr() net.Addr {
 	return s.listener.Addr()
 }
 
-func (s *Server) ConnectToPeer(peerId int, addr net.Addr) error {
+func (s *Server) ConnectToPeer(peerId int, addr string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.peerClients[peerId] == nil {
-		client, err := rpc.Dial(addr.Network(), addr.String())
+		client, err := rpc.Dial("tcp", addr)
 		if err != nil {
 			return err
 		}
+		log.Printf("Connected server %v to %v", s.serverId, peerId)
 		s.peerClients[peerId] = client
 	}
 	return nil
@@ -153,6 +145,20 @@ func (s *Server) DisconnectPeer(peerId int) error {
 	return nil
 }
 
+func (s *Server) ConnectAllPeers(serverId int) error {
+	BASE_IP := "localhost"
+	for i := 1; i <= 5; i++ {
+		for j := 1; j <= 5; j++ {
+			if i != j {
+				port := ":1200" + strconv.Itoa(j)
+				addr := BASE_IP + port
+				s.ConnectToPeer(j, addr)
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Server) Call(id int, serviceMethod string, args interface{}, reply interface{}) error {
 	s.mu.Lock()
 	peer := s.peerClients[id]
@@ -163,37 +169,6 @@ func (s *Server) Call(id int, serviceMethod string, args interface{}, reply inte
 	} else {
 		return peer.Call(serviceMethod, args, reply)
 	}
-}
-
-func (s *Server) StartCluster(n int, port string) error {
-	ns := make([]*Server, n)
-	connected := make([]bool, n)
-	commitChans := make([]chan CommitEntry, n)
-	ready := make(chan interface{})
-	for i := 0; i < 5; i++ {
-		peerIds := make([]int, 0)
-		for p := 1; p <= 5; p++ {
-			if p != i {
-				peerIds = append(peerIds, p)
-			}
-		}
-		commitChans[i] = make(chan CommitEntry)
-		ns[i] = NewServer(i, peerIds, ready, commitChans[i])
-		ns[i].Serve(port + strconv.Itoa(i+1))
-	}
-
-	// Connect all peers to each other.
-	for i := 0; i < n; i++ {
-		for j := 0; j < n; j++ {
-			if i != j {
-				ns[i].ConnectToPeer(j, ns[j].GetListenAddr())
-			}
-		}
-		connected[i] = true
-	}
-	close(ready)
-	return nil
-
 }
 
 type RPCProxy struct {
