@@ -14,6 +14,9 @@ server: main/server/chat_server.go
 client: main/client/client_main.go
 	go build $<
 
+server1: 
+	.\chat_server.exe -id 1
+
 clean:
 	rm go.mod
 	rm go.sum

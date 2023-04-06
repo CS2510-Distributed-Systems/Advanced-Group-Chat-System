@@ -103,7 +103,23 @@ func (s *Server) DisconnectAll() {
 		}
 	}
 }
+func (s *Server) setupLogFile(filename string) {
+	// open log file
+	logFile, err := os.OpenFile(filename, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer logFile.Close()
 
+	// set log out put
+	log.SetOutput(logFile)
+
+	// optional: log date-time, filename, and line number
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
+
+	log.Println("This is my first log")
+
+}
 // shutdown the server and waits for it to shutdown gracefully
 func (s *Server) shutdown() {
 	// s.cm.Stop()
@@ -177,10 +193,10 @@ func (rpp *RPCProxy) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) 
 	if len(os.Getenv("RAFT_UNRELIABLE_RPC")) > 0 {
 		dice := rand.Intn(10)
 		if dice == 9 {
-			log.Printf("drop RequestVote")
+			log.Println("drop RequestVote")
 			return fmt.Errorf("RPC failed")
 		} else if dice == 8 {
-			log.Printf("delay RequestVote")
+			log.Println("delay RequestVote")
 			time.Sleep(75 * time.Millisecond)
 		}
 	} else {
@@ -193,10 +209,10 @@ func (rpp *RPCProxy) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesR
 	if len(os.Getenv("RAFT_UNRELIABLE_RPC")) > 0 {
 		dice := rand.Intn(10)
 		if dice == 9 {
-			log.Printf("drop AppendEntries")
+			log.Println("drop AppendEntries")
 			return fmt.Errorf("RPC failed")
 		} else if dice == 8 {
-			log.Printf("delay AppendEntries")
+			log.Println("delay AppendEntries")
 			time.Sleep(75 * time.Millisecond)
 		}
 	} else {
@@ -204,3 +220,4 @@ func (rpp *RPCProxy) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesR
 	}
 	return rpp.cm.AppendEntries(args, reply)
 }
+

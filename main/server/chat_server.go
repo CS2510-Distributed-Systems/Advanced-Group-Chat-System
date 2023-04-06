@@ -22,12 +22,14 @@ func main() {
 
 	//construct the IP
 	serverId := *Id
+	serverId_string := strconv.Itoa(serverId)
 	IP_BASE := "0.0.0.0"
-	port := ":1200" + strconv.Itoa(serverId)
+	port := ":1200" + serverId_string
 	// port = ":12000"
 	IP := IP_BASE + port
 
-	//
+	//setup log file
+	filename := "server" + serverId_string + ".txt"
 
 	//create the main listener
 	listener, err := net.Listen("tcp", IP)
@@ -56,12 +58,15 @@ func main() {
 	clients := service.NewInMemoryConnStore()
 	userstore := service.NewInMemoryUserStore()
 	chatserver := service.NewChatServiceServer(groupstore, userstore, clients, raftserver)
+	
 	pb.RegisterChatServiceServer(grpcserver, chatserver)
 	pb.RegisterAuthServiceServer(grpcserver, chatserver)
+	
 
 	//use the muxed listeners for your servers
 	go grpcserver.Serve(listener)
 	raftserver.Serve()
+	raftserver.setupLogFile(filename)
 
 	//start serving
 	mux.Serve()

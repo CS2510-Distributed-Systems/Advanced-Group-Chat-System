@@ -1,0 +1,4 @@
+2023/04/06 15:55:40 chat_server.go:92: This is my first log
+2023/04/06 15:58:15 chat_server.go:92: This is my first log
+2023/04/06 15:58:25 chat_server.go:92: This is my first log
+2023/04/06 15:59:59 chat_server.go:92: This is my first log
