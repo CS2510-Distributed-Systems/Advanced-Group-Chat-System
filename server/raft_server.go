@@ -88,8 +88,7 @@ func (s *Server) Serve() {
 			}()
 
 		}
-		a := "1"
-		a = <-s.ready
+		// a = <-s.ready
 
 	}()
 }

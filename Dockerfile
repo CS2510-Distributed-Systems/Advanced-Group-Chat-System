@@ -3,7 +3,7 @@ FROM ubuntu:latest
 ENV CGO_ENABLED=0
 # Install basic packages. use based on need.
 RUN apt update
-RUN apt install -y openssl ca-certificates vim make gcc golang-go protobuf-compiler python3 netcat iputils-ping iproute2
+RUN apt install -y openssl ca-certificates vim make gcc golang-go protobuf-compiler python3 netcat iputils-ping iproute2 git
 
 # Set up certificates
 ARG cert_location=/usr/local/share/ca-certificates
@@ -27,12 +27,11 @@ COPY Advanced-Group-Chat-System /app/chat-system
 ENV APP_HOME /app/chat-system
 WORKDIR "${APP_HOME}"
 
-
+#clean
+RUN make clean
 
 #build the go project
-RUN go mod init chat-system
-RUN go mod tidy
-RUN go mod verify
+RUN make project
 WORKDIR "${APP_HOME}"
 
 #install dependencies
@@ -41,13 +40,10 @@ RUN go mod download
 EXPOSE 12000
 
 #build the server
-WORKDIR "$APP_HOME/cmd/server"
-RUN go build -o "$APP_HOME/server"
-WORKDIR "${APP_HOME}"
+RUN make -B server 
 
 #build the client
-RUN go build -o "client"
+RUN make -B client
 
-ENTRYPOINT /bin/sh
 
 

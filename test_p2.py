@@ -59,6 +59,7 @@ def server_name(server_id):
 # Do all initialization
 def init_all(args):
     init_network()
+    
     init_containers()
     time.sleep(10)
     init_netem()
@@ -71,10 +72,12 @@ def init_network():
 # Create server containers and attach them to bridge network
 def init_containers():
     for i in range(1,NUM_SERVERS+1):
-        cmd_str = "docker run --cap-add=NET_ADMIN --name {serv} --network {net} --ip {ip} {img} {cmd} {args}".format(serv=server_name(i), net=NETWORK_NAME,
+        cmd_str = "docker run -it -d --cap-add=NET_ADMIN --name {serv} --network {net} --ip {ip} {img} {cmd} {args}".format(serv=server_name(i), net=NETWORK_NAME,
         img=IMAGE_NAME, ip=server_ip(i), cmd=RUN_COMMAND, args="-id {}".format(i))
+        print(cmd_str)
         #subprocess.Popen(cmd_str, shell=True)
         subprocess.Popen(cmd_str, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(10)
     return
 
 # Initialize netem classes for each server
@@ -89,12 +92,16 @@ def init_netem():
 def _init_netem(container_name):
     # Set up base class
     cmd_str = "docker exec {} tc qdisc add dev eth0 root handle 1: htb default 10".format(container_name)
+    print(cmd_str)
     subprocess.run(cmd_str, shell=True)
     cmd_str = "docker exec {} tc class add dev eth0 parent 1: classid 1:1 htb rate 100Mbps".format(container_name)
+    print(cmd_str)
     subprocess.run(cmd_str, shell=True)
     cmd_str = "docker exec {} tc class add dev eth0 parent 1:1 classid 1:10 htb rate 100Mbps".format(container_name)
+    print(cmd_str)
     subprocess.run(cmd_str, shell=True)
     cmd_str = "docker exec {} tc qdisc add dev eth0 parent 1:10 handle 10: netem limit 100000 delay 0ms".format(container_name)
+    print(cmd_str)
     subprocess.run(cmd_str, shell=True)
 
     # Set up special class per server

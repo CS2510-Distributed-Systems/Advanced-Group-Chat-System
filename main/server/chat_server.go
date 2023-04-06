@@ -22,8 +22,9 @@ func main() {
 
 	//construct the IP
 	serverId := *Id
-	IP_BASE := "localhost"
+	IP_BASE := "0.0.0.0"
 	port := ":1200" + strconv.Itoa(serverId)
+	port = ":12000"
 	IP := IP_BASE + port
 
 	//
