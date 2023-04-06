@@ -30,7 +30,7 @@ type Server struct {
 	commitChan  chan<- CommitEntry
 	peerClients map[int]*rpc.Client
 
-	ready <-chan string
+	ready chan int
 	quit  chan interface{}
 	wg    sync.WaitGroup
 }
@@ -53,7 +53,7 @@ func NewServer(serverId int, Listener net.Listener) *Server {
 	s.ConnectAllPeers(serverId)
 	s.listener = Listener
 
-	s.ready = make(chan string, 1)
+	s.ready = make(chan int, 10)
 	s.quit = make(chan interface{})
 
 	s.cm = NewConsensusModule(s.serverId, s.peerIds, s, s.ready, s.commitChan)
@@ -70,7 +70,7 @@ func (s *Server) Serve() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-
+		close(s.ready)
 		for {
 			conn, err := s.listener.Accept()
 			if err != nil {
@@ -88,7 +88,6 @@ func (s *Server) Serve() {
 			}()
 
 		}
-		// a = <-s.ready
 
 	}()
 }

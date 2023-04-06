@@ -90,7 +90,7 @@ type ConsensusModule struct {
 
 // new consensus module creation with the given ID, list of peerID's and server.
 // Ready channel signals CM that all the peers are connected and its safe to start
-func NewConsensusModule(id int, peerIds []int, server *Server, ready <-chan string, commitChan chan<- CommitEntry) *ConsensusModule {
+func NewConsensusModule(id int, peerIds []int, server *Server,ready <-chan int, commitChan chan<- CommitEntry) *ConsensusModule {
 	cm := new(ConsensusModule)
 	cm.id = id
 	cm.peerIds = peerIds

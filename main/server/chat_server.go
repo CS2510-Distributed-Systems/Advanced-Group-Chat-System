@@ -24,7 +24,7 @@ func main() {
 	serverId := *Id
 	IP_BASE := "0.0.0.0"
 	port := ":1200" + strconv.Itoa(serverId)
-	port = ":12000"
+	// port = ":12000"
 	IP := IP_BASE + port
 
 	//
