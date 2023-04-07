@@ -2,6 +2,7 @@
 package chat_server
 
 import (
+	"chat-system/pb"
 	"log"
 	"math/rand"
 	"sync"
@@ -10,11 +11,19 @@ import (
 
 const DebugCM = 1
 
+// Command struct for the chat service application
+type Command struct {
+	event          string
+	triggeredby    string
+	triggeredgroup string
+	message        *pb.ChatMessage
+}
+
 // Data reported by the raft to the commit channel. Each commit notifies that the consensus is achieved
 // on a command and it can be applied to the clients state machine.
 type CommitEntry struct {
 	//command being commited
-	Command interface{}
+	Command Command
 
 	//Log index where the client command is being commited
 	Index int
@@ -24,7 +33,7 @@ type CommitEntry struct {
 }
 
 type LogEntry struct {
-	Command interface{}
+	Command Command
 	Term    int
 }
 
@@ -65,9 +74,6 @@ type ConsensusModule struct {
 
 	//server of this CM
 	server *Server
-
-	//replication log persistence
-	replicatedlog *replicatedlog
 
 	commitChan chan<- CommitEntry
 
@@ -133,7 +139,13 @@ func (cm *ConsensusModule) Submit(command interface{}) bool {
 
 	log.Printf("Submit received by %v: %v", cm.state, command)
 	if cm.state == Leader {
-		cm.log = append(cm.log, LogEntry{Command: command, Term: cm.currentTerm})
+		// newlog := new(raft.Log)
+		// cm.log = append(cm.log,  &raft.Log{
+		// 	Index: uint64(i),
+		// 	Term:  10,
+		// 	Type:  0,
+		// 	Data:  []byte(command),
+		// })
 		log.Printf(".. log=%v", cm.log)
 		return true
 	}
@@ -169,7 +181,7 @@ func (cm *ConsensusModule) RequestVote(args RequestVoteArgs, reply *RequestVoteR
 	}
 
 	//if term matches
-	//if cm didnot vote for any candidate yet..vote 
+	//if cm didnot vote for any candidate yet..vote
 	//if already voted..ignore
 	if cm.currentTerm == args.Term &&
 		(cm.votedFor == -1 || cm.votedFor == args.CandidateId) &&
@@ -293,7 +305,7 @@ func (cm *ConsensusModule) runElectionTimer() {
 			log.Printf("in election timer state= %s, bailing out", cm.state)
 			return
 		}
-		
+
 		//if terms dont match. stop the timer
 		if termStarted != cm.currentTerm {
 			log.Printf("in election timer term changed from %d to %d, bailing out", termStarted, cm.currentTerm)
@@ -451,13 +463,13 @@ func (cm *ConsensusModule) leaderSendHeartBeats() {
 					cm.becomeFollower(reply.Term)
 					return
 				}
-				//if cm is the leader and is in the same term of peer 
+				//if cm is the leader and is in the same term of peer
 				if cm.state == Leader && savedCurrentTerm == reply.Term {
 					if reply.Success {
-						//update the cm with new next index of the peer 
+						//update the cm with new next index of the peer
 						cm.nextIndex[peerId] = ni + len(entries)
 						cm.matchIndex[peerId] = cm.nextIndex[peerId] - 1
-						log.Printf("AppendEntries reply from %d success: nextIndex := %v, matchIndex := %v", peerId, cm.nextIndex)
+						log.Printf("AppendEntries reply from %d success: nextIndex := %v, matchIndex := %v", peerId, cm.nextIndex, cm.matchIndex)
 						//get the commit index of the cm
 						savedCommitIndex := cm.commitIndex
 						//iterate over new log entries
@@ -465,7 +477,7 @@ func (cm *ConsensusModule) leaderSendHeartBeats() {
 							//if term matches
 							if cm.log[i].Term == cm.currentTerm {
 								matchCount := 1
-								//get the count of peers having the log entry 
+								//get the count of peers having the log entry
 								for _, peerId := range cm.peerIds {
 									if cm.matchIndex[peerId] >= i {
 										matchCount++
@@ -497,7 +509,7 @@ func (cm *ConsensusModule) commitChanSender() {
 		//find which entries we need to apply
 		cm.mu.Lock()
 		savedTerm := cm.currentTerm
-		//get last applied index 
+		//get last applied index
 		savedLastApplied := cm.lastApplied
 		var entries []LogEntry
 		//if commit index is greater.. get the remaining log entries that need to be applied
@@ -539,8 +551,21 @@ func (cm *ConsensusModule) lastLogIndexAndTerm() (int, int) {
 	}
 }
 
-func (cm *ConsensusModule) restoreLog(storage Storage) {
-	if termData, found := cm.replicatedlog.Get("currentTerm")
+// restores the persistant state of this CM from storage
+func (cm *ConsensusModule) restoreFromStorage(storage Storage) {
 
+	term, votedFor, logs := cm.server.storage.GetState()
+	cm.currentTerm = term
+	cm.votedFor = votedFor
+	cm.log = logs
+	log.Printf("State Restored succesfully from the storage")
+}
+
+// Saves all the CM's persistant state
+func (cm *ConsensusModule) persistToStorage() {
+	err := cm.server.storage.SetState(cm.currentTerm, cm.votedFor, cm.log)
+	if err == nil {
+		log.Printf("State successFully persisted in the term %v", cm.currentTerm)
 	}
+
 }

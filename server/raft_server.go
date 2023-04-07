@@ -24,7 +24,9 @@ type Server struct {
 
 	serverId int
 	peerIds  []int
-	storage  *DiskStore
+
+	//persistance storage of app data and raft data
+	storage *DiskStore
 
 	cm       *ConsensusModule
 	rpcProxy *RPCProxy
@@ -68,15 +70,25 @@ func NewServer(serverId int, Listener net.Listener) *Server {
 	s.rpcServer.RegisterName("ConsensusModule", s.rpcProxy)
 
 	//Initialize the Diskstore persistance storage
-	cfg := raftbadger.Config{
+	//config for app data
+	cfg_appdata := raftbadger.Config{
 		DataPath: "/server/diskstore/server" + strconv.Itoa(serverId),
 	}
-	diskstore, err := raftbadger.New(cfg, nil)
+	diskstore, err := raftbadger.New(cfg_appdata, nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
+	}
+	//config for raft
+	cfg_raftdata := raftbadger.Config{
+		DataPath: "/server/diskstore/server" + strconv.Itoa(serverId) + "/raft",
+	}
+	raftdiskstore, err := raftbadger.New(cfg_raftdata, nil)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
 	}
 	s.storage = &DiskStore{
-		diskstore: diskstore,
+		diskstore:     diskstore,
+		replicatedlog: raftdiskstore,
 	}
 
 	return s
@@ -139,12 +151,12 @@ func (s *Server) SetupLogFile(filename string) {
 }
 
 // shutdown the server and waits for it to shutdown gracefully
-func (s *Server) shutdown() {
-	// s.cm.Stop()
-	close(s.quit)
-	s.listener.Close()
-	s.wg.Wait()
-}
+// func (s *Server) shutdown() {
+// 	// s.cm.Stop()
+// 	close(s.quit)
+// 	s.listener.Close()
+// 	s.wg.Wait()
+// }
 
 func (s *Server) GetListenAddr() net.Addr {
 	s.mu.Lock()
