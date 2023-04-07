@@ -11,7 +11,7 @@ import (
 const DebugCM = 1
 
 // Data reported by the raft to the commit channel. Each commit notifies that the consensus is achieved
-// on a command and it can be applied to the clients state , machine.
+// on a command and it can be applied to the clients state machine.
 type CommitEntry struct {
 	//command being commited
 	Command interface{}
@@ -65,6 +65,9 @@ type ConsensusModule struct {
 
 	//server of this CM
 	server *Server
+
+	//replication log persistence
+	replicatedlog *replicatedlog
 
 	commitChan chan<- CommitEntry
 
@@ -128,10 +131,10 @@ func (cm *ConsensusModule) Submit(command interface{}) bool {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	log.Println("Submit received by %v: %v", cm.state, command)
+	log.Printf("Submit received by %v: %v", cm.state, command)
 	if cm.state == Leader {
 		cm.log = append(cm.log, LogEntry{Command: command, Term: cm.currentTerm})
-		log.Println(".. log=%v", cm.log)
+		log.Printf(".. log=%v", cm.log)
 		return true
 	}
 	return false
@@ -157,14 +160,17 @@ func (cm *ConsensusModule) RequestVote(args RequestVoteArgs, reply *RequestVoteR
 		return nil
 	}
 	lastLogIndex, LastLogTerm := cm.lastLogIndexAndTerm()
-	log.Println("RequestVote: %v [currentTerm = %v, votedFor = %v, log index/term= (%d,%d)]", args, cm.currentTerm, cm.votedFor, lastLogIndex, LastLogTerm)
+	log.Printf("RequestVote: %v [currentTerm = %v, votedFor = %v, log index/term= (%d,%d)]", args, cm.currentTerm, cm.votedFor, lastLogIndex, LastLogTerm)
 
 	//if a term received is greater than the current term..become a follower
 	if args.Term > cm.currentTerm {
-		log.Println("Current term out of date..")
+		log.Printf("Current term out of date..")
 		cm.becomeFollower(args.Term)
 	}
 
+	//if term matches
+	//if cm didnot vote for any candidate yet..vote 
+	//if already voted..ignore
 	if cm.currentTerm == args.Term &&
 		(cm.votedFor == -1 || cm.votedFor == args.CandidateId) &&
 		(args.LastLogTerm > LastLogTerm ||
@@ -177,7 +183,7 @@ func (cm *ConsensusModule) RequestVote(args RequestVoteArgs, reply *RequestVoteR
 	}
 
 	reply.Term = cm.currentTerm
-	log.Println("Requestvote Reply : %v", reply)
+	log.Printf("Requestvote Reply : %v", reply)
 	return nil
 }
 
@@ -201,27 +207,28 @@ func (cm *ConsensusModule) AppendEntries(args AppendEntriesArgs, reply *AppendEn
 	if cm.state == Dead {
 		return nil
 	}
-	log.Println("AppendEntries: %v", args)
+	log.Printf("AppendEntries: %v", args)
 
 	//if a term received is greater than the current term..become a follower
 	if args.Term > cm.currentTerm {
-		log.Println("Current term out of date..")
+		log.Printf("Current term out of date..")
 		cm.becomeFollower(args.Term)
 	}
 
 	reply.Success = false
 	if args.Term == cm.currentTerm {
+		//it may happen that two leaders exists in same term..make later as follower
 		if cm.state != Follower {
 			cm.becomeFollower(args.Term)
 		}
 		cm.electionResetEvent = time.Now()
 
-		//Does our Entry contains an Entry at PrevLogIndex whose term matches
+		//Does our log contains an Entry at PrevLogIndex whose term matches
 		if args.PrevLogIndex == -1 ||
 			(args.PrevLogIndex < len(cm.log) && args.PrevLogTerm == cm.log[args.PrevLogIndex].Term) {
 			reply.Success = true
 			//find an insertion point - where theres a term mismatch between
-			//the  existing log starting at PrevLogIndex+1 and the new entries sent in the RPC
+			//the existing log starting at PrevLogIndex+1 and the new entries sent in the RPC
 			logInsertIndex := args.PrevLogIndex + 1
 			newEntriesIndex := 0
 
@@ -241,22 +248,22 @@ func (cm *ConsensusModule) AppendEntries(args AppendEntriesArgs, reply *AppendEn
 			// -newEntriesIndex points to the End of the entries, or an index
 			//where the term mismatches with the corresponding log entry
 			if newEntriesIndex < len(args.Entries) {
-				log.Println("... inserting %v from index %d", args.Entries[newEntriesIndex:], logInsertIndex)
+				log.Printf("... inserting %v from index %d", args.Entries[newEntriesIndex:], logInsertIndex)
 				cm.log = append(cm.log[:logInsertIndex], args.Entries[newEntriesIndex:]...)
-				log.Println("... log is now: %v", cm.log)
+				log.Printf("... log is now: %v", cm.log)
 			}
 
 			//set commit index
 			if args.LeaderCommit > cm.commitIndex {
 				cm.commitIndex = intMin(args.LeaderCommit, len(cm.log)-1)
-				log.Println("... setting commitIndex=%d", cm.commitIndex)
+				log.Printf("... setting commitIndex=%d", cm.commitIndex)
 				cm.newCommitReadyChan <- struct{}{}
 			}
 		}
 	}
 
 	reply.Term = cm.currentTerm
-	log.Println("AppedEntries reply : %v", *reply)
+	log.Printf("AppedEntries reply : %v", *reply)
 	return nil
 }
 
@@ -269,25 +276,33 @@ func (cm *ConsensusModule) runElectionTimer() {
 	cm.mu.Lock()
 	termStarted := cm.currentTerm
 	cm.mu.Unlock()
-	log.Println("Election time started (%v), term=%d", timeoutDuration, termStarted)
+	// log.Printf("Election time started (%v), term=%d", timeoutDuration, termStarted)
 
+	//This loops until
+	//1. When election timer is no longer needed
+	//2. Election timer expires and CM becomes a condidate
+	//for a follower, this keeps ticking for lifetime
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
 
 		cm.mu.Lock()
+		//if its a leader . stop the timer
 		if cm.state != Candidate && cm.state != Follower {
-			log.Println("in election timer state= %s, bailing out", cm.state)
+			log.Printf("in election timer state= %s, bailing out", cm.state)
 			return
 		}
-
+		
+		//if terms dont match. stop the timer
 		if termStarted != cm.currentTerm {
-			log.Println("in election timer term changed from %d to %d, bailing out", termStarted, cm.currentTerm)
+			log.Printf("in election timer term changed from %d to %d, bailing out", termStarted, cm.currentTerm)
 			cm.mu.Unlock()
 			return
 		}
 
+		//if cm is follower and didnt hear from leader for the duration of timeout
+		//start the Election
 		if elapsed := time.Since(cm.electionResetEvent); elapsed >= timeoutDuration {
 			cm.startElection()
 			cm.mu.Unlock()
@@ -303,11 +318,11 @@ func (cm *ConsensusModule) startElection() {
 	savedCurrentTerm := cm.currentTerm
 	cm.electionResetEvent = time.Now()
 	cm.votedFor = cm.id
-	log.Println("becomes Candidate (currentTerm=%d); log= %v", savedCurrentTerm, cm.log)
+	// log.Printf("becomes Candidate (currentTerm=%d); log= %v", savedCurrentTerm, cm.log)
 
 	votesReceived := 1
 
-	//send RequestVote RPC's to all the servers Concurrently
+	//send RequestVote RPC's to all the servers Concurrently, to collect the votes
 	for _, peerId := range cm.peerIds {
 		go func(peerId int) {
 			cm.mu.Lock()
@@ -322,26 +337,28 @@ func (cm *ConsensusModule) startElection() {
 			}
 			var reply RequestVoteReply
 
-			log.Println("Sending RequestVote to %d: %+v", peerId, args)
+			// log.Printf("Sending RequestVote to %d: %+v", peerId, args)
 			if err := cm.server.Call(peerId, "ConsensusModule.RequestVote", args, &reply); err == nil {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
-				log.Println("received RequestVoteReply %+v", reply)
+				log.Printf("received RequestVoteReply %+v", reply)
 
+				//when other RV calls received a majority, then election might have already been done
 				if cm.state != Candidate {
-					log.Println("While waiting for reply, State = %v", cm.state)
+					log.Printf("While waiting for reply, State changed to %v", cm.state)
 					return
 				}
 
+				//if cm finds that its term is stale, become follower. else proceed with voting
 				if reply.Term > savedCurrentTerm {
-					log.Println("term out of date in RequestVoteReply")
+					log.Printf("term out of date in RequestVoteReply")
 					cm.becomeFollower(reply.Term)
 					return
 				} else if reply.Term == savedCurrentTerm {
 					if reply.VoteGranted {
 						votesReceived += 1
 						if votesReceived*2 > len(cm.peerIds)+1 {
-							log.Println("Wins election with %d votes", votesReceived)
+							log.Printf("Wins election with %d votes", votesReceived)
 							cm.startLeader()
 							return
 						}
@@ -357,7 +374,7 @@ func (cm *ConsensusModule) startElection() {
 
 // becomes a floower ans changes its state
 func (cm *ConsensusModule) becomeFollower(term int) {
-	log.Println("Become follower with term = %v, log = %v", term, cm.log)
+	log.Printf("Become follower with term = %v, log = %v", term, cm.log)
 	cm.state = Follower
 	cm.currentTerm = term
 	cm.votedFor = -1
@@ -368,7 +385,7 @@ func (cm *ConsensusModule) becomeFollower(term int) {
 
 func (cm *ConsensusModule) startLeader() {
 	cm.state = Leader
-	log.Println("Becomes Leader; term = %d, log=%v", cm.currentTerm, cm.log)
+	log.Printf("Becomes Leader; term = %d, log=%v", cm.currentTerm, cm.log)
 
 	go func() {
 		ticker := time.NewTicker(50 * time.Millisecond)
@@ -402,12 +419,15 @@ func (cm *ConsensusModule) leaderSendHeartBeats() {
 	for _, peerId := range cm.peerIds {
 		go func(peerId int) {
 			cm.mu.Lock()
+			//cm's view of last index of the peer
 			ni := cm.nextIndex[peerId]
+
 			prevLogIndex := ni - 1
 			prevLogTerm := -1
 			if prevLogIndex >= 0 {
 				prevLogTerm = cm.log[prevLogIndex].Term
 			}
+			//pick all entries of log after ni.
 			entries := cm.log[ni:]
 
 			args := AppendEntriesArgs{
@@ -420,44 +440,51 @@ func (cm *ConsensusModule) leaderSendHeartBeats() {
 			}
 			cm.mu.Unlock()
 
-			log.Println("sending AppendEntries to %v: ni=%d, args=%+v", peerId, ni, args)
+			log.Printf("sending new AppendEntries to %v: ni=%d, args=%+v", peerId, ni, args)
 			var reply AppendEntriesReply
 			if err := cm.server.Call(peerId, "ConsensusModule.AppendEntries", args, &reply); err == nil {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
+				//if peer's term is higher, become a follower
 				if reply.Term > savedCurrentTerm {
-					log.Println("term out of date in heartbeat reply")
+					log.Printf("term out of date in heartbeat reply")
 					cm.becomeFollower(reply.Term)
 					return
 				}
-
+				//if cm is the leader and is in the same term of peer 
 				if cm.state == Leader && savedCurrentTerm == reply.Term {
 					if reply.Success {
+						//update the cm with new next index of the peer 
 						cm.nextIndex[peerId] = ni + len(entries)
 						cm.matchIndex[peerId] = cm.nextIndex[peerId] - 1
-						log.Println("AppendEntries reply from %d success: nextIndex := %v, matchIndex := %v", peerId, cm.nextIndex)
-
+						log.Printf("AppendEntries reply from %d success: nextIndex := %v, matchIndex := %v", peerId, cm.nextIndex)
+						//get the commit index of the cm
 						savedCommitIndex := cm.commitIndex
+						//iterate over new log entries
 						for i := cm.commitIndex + 1; i < len(cm.log); i++ {
+							//if term matches
 							if cm.log[i].Term == cm.currentTerm {
 								matchCount := 1
+								//get the count of peers having the log entry 
 								for _, peerId := range cm.peerIds {
 									if cm.matchIndex[peerId] >= i {
 										matchCount++
 									}
 								}
+								//if majority..bring the commit index to i
 								if matchCount*2 > len(cm.peerIds)+1 {
 									cm.commitIndex = i
 								}
 							}
 						}
+						//if commit index is changed..send the entries to the commitchannel
 						if cm.commitIndex != savedCommitIndex {
-							log.Println("leader sets commmitIndex := %d", cm.commitIndex)
+							log.Printf("leader sets commmitIndex := %d", cm.commitIndex)
 							cm.newCommitReadyChan <- struct{}{}
 						}
 					} else {
 						cm.nextIndex[peerId] = ni - 1
-						log.Println("AppendEntries reply from %d !sucess: nextIndex := %d", peerId, ni-1)
+						log.Printf("AppendEntries reply from %d !sucess: nextIndex := %d", peerId, ni-1)
 					}
 				}
 			}
@@ -470,15 +497,18 @@ func (cm *ConsensusModule) commitChanSender() {
 		//find which entries we need to apply
 		cm.mu.Lock()
 		savedTerm := cm.currentTerm
+		//get last applied index 
 		savedLastApplied := cm.lastApplied
 		var entries []LogEntry
+		//if commit index is greater.. get the remaining log entries that need to be applied
 		if cm.commitIndex > cm.lastApplied {
 			entries = cm.log[cm.lastApplied+1 : cm.commitIndex+1]
 			cm.lastApplied = cm.commitIndex
 		}
 		cm.mu.Unlock()
-		log.Println("commitChanSender entries = %v, savedLastApplied = %d", entries, savedLastApplied)
+		log.Printf("commitChanSender entries = %v, savedLastApplied = %d", entries, savedLastApplied)
 
+		//send them to commit channel
 		for i, entry := range entries {
 			cm.commitChan <- CommitEntry{
 				Command: entry.Command,
@@ -487,7 +517,7 @@ func (cm *ConsensusModule) commitChanSender() {
 			}
 		}
 	}
-	log.Println("CommitChanSender done")
+	log.Printf("CommitChanSender done")
 }
 
 func intMin(a, b int) int {
@@ -506,5 +536,11 @@ func (cm *ConsensusModule) lastLogIndexAndTerm() (int, int) {
 		return lastIndex, cm.log[lastIndex].Term
 	} else {
 		return -1, -1
+	}
+}
+
+func (cm *ConsensusModule) restoreLog(storage Storage) {
+	if termData, found := cm.replicatedlog.Get("currentTerm")
+
 	}
 }

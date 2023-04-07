@@ -11,6 +11,7 @@ import (
 
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
+	//badger storage
 )
 
 func main() {
@@ -28,49 +29,36 @@ func main() {
 	// port = ":12000"
 	IP := IP_BASE + port
 
-	//setup log file
-	filename := "server" + serverId_string + ".txt"
+	var wg sync.WaitGroup
 
-	//create the main listener
+	//Initialize the Listener and the servers
 	listener, err := net.Listen("tcp", IP)
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	var wg sync.WaitGroup
-
-	//create a cmux
+	//create a cmux to multiplex between GRPC and net/rpc requests
 	mux := cmux.New(listener)
-
 	//match connections in order
 	//first grpc, then go rpc
 	// grpcL := mux.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
 	trpcL := mux.Match(cmux.Any())
-
 	//The gRPC server
 	grpcserver := grpc.NewServer()
-
 	//the go rpc (raft) server
 	raftserver := service.NewServer(serverId, trpcL)
 
-	//initialize and register the chatserver
+	//register the services
 	groupstore := service.NewInMemoryGroupStore()
 	clients := service.NewInMemoryConnStore()
 	userstore := service.NewInMemoryUserStore()
 	chatserver := service.NewChatServiceServer(groupstore, userstore, clients, raftserver)
-	
 	pb.RegisterChatServiceServer(grpcserver, chatserver)
 	pb.RegisterAuthServiceServer(grpcserver, chatserver)
-	
-
-	//use the muxed listeners for your servers
+	//Start Serving
 	go grpcserver.Serve(listener)
 	raftserver.Serve()
-	raftserver.setupLogFile(filename)
-
-	//start serving
 	mux.Serve()
 
-	//wait for go routines to end
+	//wait for all go routines to end
 	wg.Wait()
 }

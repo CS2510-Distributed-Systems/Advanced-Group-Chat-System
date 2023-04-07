@@ -13,6 +13,10 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	//badger storage
+
+	raftbadger "github.com/rfyiamcool/raft-badger"
 )
 
 type Server struct {
@@ -20,6 +24,7 @@ type Server struct {
 
 	serverId int
 	peerIds  []int
+	storage  *DiskStore
 
 	cm       *ConsensusModule
 	rpcProxy *RPCProxy
@@ -62,6 +67,18 @@ func NewServer(serverId int, Listener net.Listener) *Server {
 	s.rpcProxy = &RPCProxy{cm: s.cm}
 	s.rpcServer.RegisterName("ConsensusModule", s.rpcProxy)
 
+	//Initialize the Diskstore persistance storage
+	cfg := raftbadger.Config{
+		DataPath: "/server/diskstore/server" + strconv.Itoa(serverId),
+	}
+	diskstore, err := raftbadger.New(cfg, nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
+	}
+	s.storage = &DiskStore{
+		diskstore: diskstore,
+	}
+
 	return s
 }
 
@@ -103,7 +120,7 @@ func (s *Server) DisconnectAll() {
 		}
 	}
 }
-func (s *Server) setupLogFile(filename string) {
+func (s *Server) SetupLogFile(filename string) {
 	// open log file
 	logFile, err := os.OpenFile(filename, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
@@ -120,6 +137,7 @@ func (s *Server) setupLogFile(filename string) {
 	log.Println("This is my first log")
 
 }
+
 // shutdown the server and waits for it to shutdown gracefully
 func (s *Server) shutdown() {
 	// s.cm.Stop()
@@ -220,4 +238,3 @@ func (rpp *RPCProxy) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesR
 	}
 	return rpp.cm.AppendEntries(args, reply)
 }
-
