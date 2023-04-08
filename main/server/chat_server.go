@@ -59,6 +59,7 @@ func main() {
 	go grpcserver.Serve(listener)
 	raftserver.Serve()
 	mux.Serve()
+	
 	//wait for all go routines to end
 	wg.Wait()
 	

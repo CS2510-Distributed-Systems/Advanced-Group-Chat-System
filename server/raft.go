@@ -19,6 +19,22 @@ type Command struct {
 	Message        *pb.ChatMessage
 }
 
+func NewCommand() *Command {
+	return &Command{
+		Event:          "",
+		Triggeredby:    "",
+		Triggeredgroup: "",
+		Message: &pb.ChatMessage{
+			MessagedBy: &pb.User{
+				Id:   0,
+				Name: "",
+			},
+			Message: "",
+			LikedBy: make(map[string]string),
+		},
+	}
+}
+
 // Data reported by the raft to the commit channel. Each commit notifies that the consensus is achieved
 // on a command and it can be applied to the clients state machine.
 type CommitEntry struct {
@@ -69,6 +85,9 @@ type ConsensusModule struct {
 	//id of the server of this CM
 	id int
 
+	//keep track of leader
+	leaderid int
+
 	// peerID's list of our peers in the cluster
 	peerIds []int
 
@@ -110,6 +129,7 @@ func NewConsensusModule(id int, peerIds []int, server *Server, ready <-chan int,
 	log.Printf("Initialising raft consensus..")
 	cm := new(ConsensusModule)
 	cm.id = id
+	cm.leaderid = -1
 	cm.peerIds = peerIds
 	cm.server = server
 	cm.commitChan = commitChan
@@ -162,6 +182,9 @@ func (cm *ConsensusModule) Submit(command Command) bool {
 		cm.mu.Unlock()
 		cm.triggerAEChan <- struct{}{}
 		return true
+	} else {
+		cm.forwardToLeader(command)
+
 	}
 	return false
 }
@@ -244,6 +267,36 @@ type AppendEntriesReply struct {
 	ConflictTerm  int
 }
 
+type ForwardToLeaderArgs struct {
+	Command Command
+}
+
+type LeaderReply struct {
+	Success bool
+	//Receive a leaderid if its sent to follower
+	Leaderid int
+}
+
+func (cm *ConsensusModule) ForwardRequest(args ForwardToLeaderArgs, reply *LeaderReply) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if cm.state == Dead {
+		return nil
+	}
+	log.Printf("Forwarding the command to leader which is server: %v", cm.leaderid)
+
+	reply.Success = false
+	//if cm is leader
+	if cm.state == Leader {
+		if cm.Submit(args.Command) {
+			reply.Success = true
+			reply.Leaderid = cm.id
+		}
+	}
+
+	return nil
+}
+
 func (cm *ConsensusModule) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -251,7 +304,8 @@ func (cm *ConsensusModule) AppendEntries(args AppendEntriesArgs, reply *AppendEn
 		return nil
 	}
 	log.Printf("AppendEntries: %v", args)
-
+	//update the current leader details
+	cm.leaderid = args.LeaderId
 	//if a term received is greater than the current term..become a follower
 	if args.Term > cm.currentTerm {
 		log.Printf("Current term out of date..")
@@ -429,6 +483,7 @@ func (cm *ConsensusModule) becomeFollower(term int) {
 
 func (cm *ConsensusModule) startLeader() {
 	cm.state = Leader
+	cm.leaderid = cm.id
 	log.Printf("Becomes Leader; term = %d, log=%v", cm.currentTerm, cm.log)
 
 	for _, peerId := range cm.peerIds {
@@ -480,6 +535,37 @@ func (cm *ConsensusModule) startLeader() {
 			}
 		}
 	}(50 * time.Millisecond)
+}
+
+func (cm *ConsensusModule) forwardToLeader(command Command) {
+	if cm.state != Leader {
+		go func() {
+			log.Printf("Sorry, I'm not the leader rn.")
+
+			args := ForwardToLeaderArgs{
+				Command: command,
+			}
+			var reply LeaderReply
+			cm.mu.Lock()
+			leader := cm.leaderid
+
+			// log.Printf("Sending RequestVote to %d: %+v", peerId, args)
+			log.Printf("forwarding to Leader server %v", cm.leaderid)
+			if err := cm.server.Call(leader, "ConsensusModule.ForwardRequest", args, &reply); err == nil {
+
+				defer cm.mu.Unlock()
+				log.Printf("received LeaderReply %v", reply)
+
+				if reply.Success {
+					log.Printf("Succesfully forwarded the request to leader")
+					cm.leaderid = reply.Leaderid
+				} else {
+					cm.forwardToLeader(command)
+				}
+			}
+		}()
+
+	}
 }
 
 // leaderSendAEs sends a round of AEs to all peers, collects their
@@ -577,6 +663,72 @@ func (cm *ConsensusModule) leaderSendAEs() {
 	}
 }
 
+func (cm *ConsensusModule) commitChanSender() {
+	for range cm.newCommitReadyChan {
+		//find which entries we need to apply
+		cm.mu.Lock()
+		savedTerm := cm.currentTerm
+		//get last applied index
+		savedLastApplied := cm.lastApplied
+		var entries []LogEntry
+		//if commit index is greater.. get the remaining log entries that need to be applied
+		if cm.commitIndex > cm.lastApplied {
+			entries = cm.log[cm.lastApplied+1 : cm.commitIndex+1]
+			cm.lastApplied = cm.commitIndex
+		}
+		cm.mu.Unlock()
+		log.Printf("commitChanSender entries = %v, savedLastApplied = %d", entries, savedLastApplied)
+
+		//send them to commit channel
+		for i, entry := range entries {
+			cm.commitChan <- CommitEntry{
+				Command: entry.Command,
+				Index:   savedLastApplied + i + 1,
+				Term:    savedTerm,
+			}
+		}
+	}
+	log.Printf("CommitChanSender done")
+}
+
+func intMin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// lastLogIndexAndTerm returns the last log index and the last log entry's term
+// (or -1 if there's no log) for this server.
+// Expects cm.mu to be locked.
+func (cm *ConsensusModule) lastLogIndexAndTerm() (int, int) {
+	if len(cm.log) > 0 {
+		lastIndex := len(cm.log) - 1
+		return lastIndex, cm.log[lastIndex].Term
+	} else {
+		return -1, -1
+	}
+}
+
+// restores the persistant state of this CM from storage
+func (cm *ConsensusModule) restoreFromStorage() {
+
+	term, votedFor, logs := cm.storage.GetState()
+	cm.currentTerm = term
+	cm.votedFor = votedFor
+	cm.log = logs
+	log.Printf("State Restored succesfully from the storage")
+}
+
+// Saves all the CM's persistant state
+func (cm *ConsensusModule) persistToStorage() {
+	err := cm.storage.SetState(cm.currentTerm, cm.votedFor, cm.log)
+	if err == nil {
+		log.Printf("State successFully persisted in the term %v", cm.currentTerm)
+	}
+
+}
+
 // sends a roundof heartbeats to all the peers, collects their replies and adjusts cm's state.
 // func (cm *ConsensusModule) leaderSendHeartBeats() {
 // cm.mu.Lock()
@@ -586,7 +738,6 @@ func (cm *ConsensusModule) leaderSendAEs() {
 // }
 // savedCurrentTerm := cm.currentTerm
 // cm.mu.Unlock()
-
 // for _, peerId := range cm.peerIds {
 // 	go func(peerId int) {
 // 		cm.mu.Lock()
@@ -662,69 +813,3 @@ func (cm *ConsensusModule) leaderSendAEs() {
 // 	}(peerId)
 // }
 // }
-
-func (cm *ConsensusModule) commitChanSender() {
-	for range cm.newCommitReadyChan {
-		//find which entries we need to apply
-		cm.mu.Lock()
-		savedTerm := cm.currentTerm
-		//get last applied index
-		savedLastApplied := cm.lastApplied
-		var entries []LogEntry
-		//if commit index is greater.. get the remaining log entries that need to be applied
-		if cm.commitIndex > cm.lastApplied {
-			entries = cm.log[cm.lastApplied+1 : cm.commitIndex+1]
-			cm.lastApplied = cm.commitIndex
-		}
-		cm.mu.Unlock()
-		log.Printf("commitChanSender entries = %v, savedLastApplied = %d", entries, savedLastApplied)
-
-		//send them to commit channel
-		for i, entry := range entries {
-			cm.commitChan <- CommitEntry{
-				Command: entry.Command,
-				Index:   savedLastApplied + i + 1,
-				Term:    savedTerm,
-			}
-		}
-	}
-	log.Printf("CommitChanSender done")
-}
-
-func intMin(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// lastLogIndexAndTerm returns the last log index and the last log entry's term
-// (or -1 if there's no log) for this server.
-// Expects cm.mu to be locked.
-func (cm *ConsensusModule) lastLogIndexAndTerm() (int, int) {
-	if len(cm.log) > 0 {
-		lastIndex := len(cm.log) - 1
-		return lastIndex, cm.log[lastIndex].Term
-	} else {
-		return -1, -1
-	}
-}
-
-// restores the persistant state of this CM from storage
-func (cm *ConsensusModule) restoreFromStorage() {
-
-	term, votedFor, logs := cm.storage.GetState()
-	cm.currentTerm = term
-	cm.votedFor = votedFor
-	cm.log = logs
-	log.Printf("State Restored succesfully from the storage")
-}
-
-// Saves all the CM's persistant state
-func (cm *ConsensusModule) persistToStorage() {
-	err := cm.storage.SetState(cm.currentTerm, cm.votedFor, cm.log)
-	if err == nil {
-		log.Printf("State successFully persisted in the term %v", cm.currentTerm)
-	}
-
-}

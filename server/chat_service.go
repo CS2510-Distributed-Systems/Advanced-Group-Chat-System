@@ -32,14 +32,24 @@ func NewChatServiceServer(groupstore GroupStore, userstore UserStore, clients Co
 
 func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
 	user_name := req.User.Name
+	//construct command to sent to raft
+	event := "u"
+	command := NewCommand()
+	command.Event = event
+	command.Triggeredby = user_name
+	s.raft.cm.Submit(*command)
+
 	log.Printf("Logging as: %v", user_name)
 	newUser := &pb.User{
 		Id:   uuid.New().ID(),
 		Name: user_name,
 	}
-	s.raft.cm.storage.SaveUser(newUser)
-	res := &pb.LoginResponse{
-		User: req.GetUser(),
+	res := &pb.LoginResponse{}
+
+	if err := s.raft.cm.storage.SaveUser(newUser); err == nil {
+		res = &pb.LoginResponse{
+			User: req.GetUser(),
+		}
 	}
 
 	return res, nil
