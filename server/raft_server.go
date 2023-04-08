@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
 )
 
 type Server struct {
@@ -90,9 +89,7 @@ func (s *Server) Serve() {
 				s.rpcServer.ServeConn(conn)
 				s.wg.Done()
 			}()
-
 		}
-
 	}()
 }
 
@@ -108,7 +105,6 @@ func (s *Server) DisconnectAll() {
 	}
 }
 
-
 // shutdown the server and waits for it to shutdown gracefully
 // func (s *Server) shutdown() {
 // 	// s.cm.Stop()
@@ -123,17 +119,29 @@ func (s *Server) GetListenAddr() net.Addr {
 	return s.listener.Addr()
 }
 
+func (s *Server) GetPeerAddr(peerId int) string {
+	BASE_IP := "0.0.0.0"
+	port := ":1200" + strconv.Itoa(peerId)
+	addr := BASE_IP + port
+	return addr
+}
+
 func (s *Server) ConnectToPeer(peerId int, addr string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.peerClients[peerId] == nil {
-		client, err := rpc.Dial("tcp", addr)
-		if err != nil {
-			return err
-		}
-		log.Printf("Connected server %v to %v", s.serverId, peerId)
-		s.peerClients[peerId] = client
+	client, err := rpc.Dial("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("error occured : %v", err)
 	}
+	log.Printf("Connected server %v to %v", s.serverId, peerId)
+	s.peerClients[peerId] = client
+	return nil
+}
+
+func (s *Server) ReconnectToPeer(peerId int) error {
+	log.Printf("Reconnecting to server %v", peerId)
+	addr := s.GetPeerAddr(peerId)
+	s.ConnectToPeer(peerId, addr)
 	return nil
 }
 
@@ -148,18 +156,15 @@ func (s *Server) DisconnectPeer(peerId int) error {
 	return nil
 }
 
-func (s *Server) ConnectAllPeers(serverId int) error {
-	BASE_IP := "localhost"
+func (s *Server) ConnectAllPeers(serverId int) {
 	for i := 1; i <= 5; i++ {
 		for j := 1; j <= 5; j++ {
 			if i != j {
-				port := ":1200" + strconv.Itoa(j)
-				addr := BASE_IP + port
+				addr := s.GetPeerAddr(j)
 				s.ConnectToPeer(j, addr)
 			}
 		}
 	}
-	return nil
 }
 
 func (s *Server) Call(id int, serviceMethod string, args interface{}, reply interface{}) error {

@@ -440,7 +440,11 @@ func (cm *ConsensusModule) startElection() {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
 				log.Printf("received RequestVoteReply %+v", reply)
-
+				//As we got a response check if the peer is connected to the cm.
+				if cm.server.peerClients[peerId] == nil {
+					log.Printf("Peer %v connected back.", peerId)
+					cm.server.ReconnectToPeer(peerId)
+				}
 				//when other RV calls received a majority, then election might have already been done
 				if cm.state != Candidate {
 					log.Printf("While waiting for reply, State changed to %v", cm.state)
@@ -462,6 +466,9 @@ func (cm *ConsensusModule) startElection() {
 						}
 					}
 				}
+			} else if cm.server.peerClients[peerId] != nil {
+				log.Printf("Seems like Peer %v disconnected. Removing from peer client list.", peerId)
+				cm.server.peerClients[peerId] = nil
 			}
 		}(peerId)
 	}
@@ -555,6 +562,10 @@ func (cm *ConsensusModule) forwardToLeader(command Command) {
 
 				defer cm.mu.Unlock()
 				log.Printf("received LeaderReply %v", reply)
+				//As we got a response check if the peer is connected to the cm.
+				if cm.server.peerClients[leader] == nil {
+					cm.server.ReconnectToPeer(leader)
+				}
 
 				if reply.Success {
 					log.Printf("Succesfully forwarded the request to leader")
@@ -562,6 +573,9 @@ func (cm *ConsensusModule) forwardToLeader(command Command) {
 				} else {
 					cm.forwardToLeader(command)
 				}
+			} else {
+				log.Printf("Seems like Peer disconnected. Removing from peer client list.")
+				cm.server.peerClients[leader] = nil
 			}
 		}()
 
@@ -604,6 +618,11 @@ func (cm *ConsensusModule) leaderSendAEs() {
 			if err := cm.server.Call(peerId, "ConsensusModule.AppendEntries", args, &reply); err == nil {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
+				//As we got a response check if the peer is connected to the cm.
+				if cm.server.peerClients[peerId] == nil {
+					log.Printf("Peer %v connected back.", peerId)
+					cm.server.ReconnectToPeer(peerId)
+				}
 				if reply.Term > cm.currentTerm {
 					log.Printf("term out of date in heartbeat reply")
 					cm.becomeFollower(reply.Term)
@@ -658,6 +677,9 @@ func (cm *ConsensusModule) leaderSendAEs() {
 						log.Printf("AppendEntries reply from %d !success: nextIndex := %d", peerId, ni-1)
 					}
 				}
+			} else if cm.server.peerClients[peerId] != nil {
+				log.Printf("Seems like Peer %v disconnected. Removing from peer client list.", peerId)
+				cm.server.peerClients[peerId] = nil
 			}
 		}(peerId)
 	}
