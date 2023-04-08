@@ -54,11 +54,12 @@ func main() {
 	chatserver := service.NewChatServiceServer(groupstore, userstore, clients, raftserver)
 	pb.RegisterChatServiceServer(grpcserver, chatserver)
 	pb.RegisterAuthServiceServer(grpcserver, chatserver)
+
 	//Start Serving
 	go grpcserver.Serve(listener)
 	raftserver.Serve()
 	mux.Serve()
-
 	//wait for all go routines to end
 	wg.Wait()
+	
 }

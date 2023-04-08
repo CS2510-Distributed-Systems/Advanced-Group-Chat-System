@@ -17,6 +17,18 @@ client: main/client/client_main.go
 server1: 
 	.\chat_server.exe -id 1
 
+server2: 
+	.\chat_server.exe -id 2
+
+server3: 
+	.\chat_server.exe -id 3
+
+server4: 
+	.\chat_server.exe -id 4
+
+server5: 
+	.\chat_server.exe -id 5
+
 clean:
 	rm go.mod
 	rm go.sum

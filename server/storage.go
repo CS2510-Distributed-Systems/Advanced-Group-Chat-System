@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/hashicorp/raft"
 	"github.com/jinzhu/copier"
 	raftbadger "github.com/rfyiamcool/raft-badger"
 	"google.golang.org/protobuf/proto"
@@ -41,6 +40,28 @@ type DiskStore struct {
 	replicatedlog *raftbadger.Storage
 }
 
+func NewDiskStore(serverId int) *DiskStore {
+	cfg_appdata := raftbadger.Config{
+		DataPath: "server/diskstore/server" + strconv.Itoa(serverId),
+	}
+	diskstore, err := raftbadger.New(cfg_appdata, nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
+	}
+	//config for raft
+	cfg_raftdata := raftbadger.Config{
+		DataPath: "server/diskstore/server" + strconv.Itoa(serverId) + "/raft",
+	}
+	raftdiskstore, err := raftbadger.New(cfg_raftdata, nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
+	}
+	return &DiskStore{
+		diskstore:     diskstore,
+		replicatedlog: raftdiskstore,
+	}
+}
+
 func (store *DiskStore) SaveUser(user *pb.User) error {
 	usercopy := &pb.User{}
 	err := copier.Copy(usercopy, user)
@@ -59,50 +80,6 @@ func (store *DiskStore) SaveUser(user *pb.User) error {
 
 	log.Printf("user %v logged in the server.User stored in the disk", user.GetName())
 	return nil
-}
-
-func (store *DiskStore) Set(newlog *raft.Log, votedFor uint64) error {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	store.replicatedlog.StoreLog(newlog)
-
-	store.replicatedlog.SetUint64([]byte("votedFor"), votedFor)
-	return nil
-}
-
-func (store *DiskStore) GetState() (int, int, []LogEntry) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-
-	var term int
-	if termData, err := store.replicatedlog.Get([]byte("currentTerm")); err == nil {
-		d := gob.NewDecoder(bytes.NewBuffer(termData))
-		if err := d.Decode(term); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		log.Fatal("currentTerm not found in storage")
-	}
-	var votedFor int
-	if votedData, err := store.replicatedlog.Get([]byte("votedFor")); err == nil {
-		d := gob.NewDecoder(bytes.NewBuffer(votedData))
-		if err := d.Decode(votedFor); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		log.Fatal("votedFor not found in storage")
-	}
-	var logs []LogEntry
-	if logData, err := store.replicatedlog.Get([]byte("log")); err == nil {
-		d := gob.NewDecoder(bytes.NewBuffer(logData))
-		if err := d.Decode(logs); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		log.Fatal("log not found in storage")
-	}
-
-	return term, votedFor, logs
 }
 
 func (store *DiskStore) SetState(currentTerm int, votedFor int, logs []LogEntry) error {
@@ -129,6 +106,58 @@ func (store *DiskStore) SetState(currentTerm int, votedFor int, logs []LogEntry)
 	store.replicatedlog.Set([]byte("log"), logData.Bytes())
 
 	return nil
+}
+
+func (store *DiskStore) GetState() (int, int, []LogEntry) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	var term int
+	if termData, err := store.replicatedlog.Get([]byte("currentTerm")); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(termData))
+		if err := d.Decode(&term); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Fatal("currentTerm not found in storage")
+	}
+	var votedFor int
+	if votedData, err := store.replicatedlog.Get([]byte("votedFor")); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(votedData))
+		if err := d.Decode(&votedFor); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Fatal("votedFor not found in storage")
+	}
+	var logs []LogEntry
+	if logData, err := store.replicatedlog.Get([]byte("log")); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(logData))
+		if err := d.Decode(&logs); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Fatal("log not found in storage")
+	}
+
+	return term, votedFor, logs
+}
+
+func (store *DiskStore) HasData() bool {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var logs []LogEntry
+	if logData, err := store.replicatedlog.Get([]byte("log")); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(logData))
+		if err := d.Decode(&logs); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Printf("log not found in storage")
+	}
+
+	return len(logs) > 0
+
 }
 func checkError(err error) {
 	if err != nil {

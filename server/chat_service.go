@@ -37,7 +37,7 @@ func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*p
 		Id:   uuid.New().ID(),
 		Name: user_name,
 	}
-	s.raft.storage.SaveUser(newUser)
+	s.raft.cm.storage.SaveUser(newUser)
 	res := &pb.LoginResponse{
 		User: req.GetUser(),
 	}

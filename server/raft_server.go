@@ -14,9 +14,6 @@ import (
 	"sync"
 	"time"
 
-	//badger storage
-
-	raftbadger "github.com/rfyiamcool/raft-badger"
 )
 
 type Server struct {
@@ -24,9 +21,6 @@ type Server struct {
 
 	serverId int
 	peerIds  []int
-
-	//persistance storage of app data and raft data
-	storage *DiskStore
 
 	cm       *ConsensusModule
 	rpcProxy *RPCProxy
@@ -71,25 +65,6 @@ func NewServer(serverId int, Listener net.Listener) *Server {
 
 	//Initialize the Diskstore persistance storage
 	//config for app data
-	cfg_appdata := raftbadger.Config{
-		DataPath: "/server/diskstore/server" + strconv.Itoa(serverId),
-	}
-	diskstore, err := raftbadger.New(cfg_appdata, nil)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
-	}
-	//config for raft
-	cfg_raftdata := raftbadger.Config{
-		DataPath: "/server/diskstore/server" + strconv.Itoa(serverId) + "/raft",
-	}
-	raftdiskstore, err := raftbadger.New(cfg_raftdata, nil)
-	if err != nil {
-		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
-	}
-	s.storage = &DiskStore{
-		diskstore:     diskstore,
-		replicatedlog: raftdiskstore,
-	}
 
 	return s
 }
@@ -132,23 +107,7 @@ func (s *Server) DisconnectAll() {
 		}
 	}
 }
-func (s *Server) SetupLogFile(filename string) {
-	// open log file
-	logFile, err := os.OpenFile(filename, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer logFile.Close()
 
-	// set log out put
-	log.SetOutput(logFile)
-
-	// optional: log date-time, filename, and line number
-	log.SetFlags(log.Lshortfile | log.LstdFlags)
-
-	log.Println("This is my first log")
-
-}
 
 // shutdown the server and waits for it to shutdown gracefully
 // func (s *Server) shutdown() {
