@@ -5,14 +5,15 @@ package chat_server
 
 import (
 	"chat-system/pb"
-	"fmt"
+	"context"
 	"log"
 	"net"
-	"net/rpc"
 	"strconv"
 	"sync"
-)
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
 
 type Server struct {
 	pb.UnimplementedRaftServiceServer
@@ -22,17 +23,13 @@ type Server struct {
 	peerIds  []int64
 
 	cm       *ConsensusModule
-	rpcProxy *RPCProxy
-
-	rpcServer *rpc.Server
-	listener  net.Listener
+	listener net.Listener
 
 	commitChan  chan<- CommitEntry
-	peerClients map[int64]*rpc.Client
+	peerClients map[int64]*grpc.ClientConn
 
 	ready chan int
 	quit  chan interface{}
-	wg    sync.WaitGroup
 }
 
 func NewServer(serverId int64, Listener net.Listener) *Server {
@@ -49,7 +46,7 @@ func NewServer(serverId int64, Listener net.Listener) *Server {
 	s.peerIds = peerIds
 
 	s.commitChan = make(chan CommitEntry, 10)
-	s.peerClients = make(map[int64]*rpc.Client)
+	s.peerClients = make(map[int64]*grpc.ClientConn)
 	go s.ConnectAllPeers(serverId)
 	s.listener = Listener
 
@@ -57,13 +54,6 @@ func NewServer(serverId int64, Listener net.Listener) *Server {
 	s.quit = make(chan interface{})
 
 	s.cm = NewConsensusModule(s.serverId, s.peerIds, s, s.ready, s.commitChan)
-
-	s.rpcServer = rpc.NewServer()
-	s.rpcProxy = &RPCProxy{cm: s.cm}
-	s.rpcServer.RegisterName("ConsensusModule", s.rpcProxy)
-
-	//Initialize the Diskstore persistance storage
-	//config for app data
 
 	return s
 }
@@ -110,12 +100,15 @@ func (s *Server) GetPeerAddr(peerId int64) string {
 func (s *Server) ConnectToPeer(peerId int64, addr string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	client, err := rpc.Dial("tcp", addr)
+	transportOption := grpc.WithTransportCredentials(insecure.NewCredentials())
+	clientconn, err := grpc.Dial(addr, transportOption)
 	if err != nil {
-		return fmt.Errorf("error occured : %v", err)
+		log.Printf("Cannot Dail server %v", peerId)
+
 	}
+	log.Print(clientconn.GetState())
 	log.Printf("Connected server %v to %v", s.serverId, peerId)
-	s.peerClients[peerId] = client
+	s.peerClients[peerId] = clientconn
 	return nil
 }
 
@@ -138,30 +131,12 @@ func (s *Server) DisconnectPeer(peerId int64) error {
 }
 
 func (s *Server) ConnectAllPeers(serverId int64) {
-	for {
-		for j := 1; j <= 5; j++ {
-			if int(serverId) != j {
-				k := int64(j)
-				if s.peerClients[k] == nil {
-					addr := s.GetPeerAddr(k)
-					s.ConnectToPeer(k, addr)
-				}
-
-			}
+	for j := 1; j <= 5; j++ {
+		if int(serverId) != j {
+			k := int64(j)
+			addr := s.GetPeerAddr(k)
+			s.ConnectToPeer(k, addr)
 		}
-	}
-
-}
-
-func (s *Server) Call(id int64, serviceMethod string, args interface{}, reply interface{}) error {
-	s.mu.Lock()
-	peer := s.peerClients[id]
-	s.mu.Unlock()
-
-	if peer == nil {
-		return fmt.Errorf("call client %d after its closes", id)
-	} else {
-		return peer.Call(serviceMethod, args, reply)
 	}
 }
 
@@ -169,35 +144,14 @@ type RPCProxy struct {
 	cm *ConsensusModule
 }
 
-// func (rpp *RPCProxy) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
-// 	if len(os.Getenv("RAFT_UNRELIABLE_RPC")) > 0 {
-// 		dice := rand.Intn(10)
-// 		if dice == 9 {
-// 			log.Println("drop RequestVote")
-// 			return fmt.Errorf("RPC failed")
-// 		} else if dice == 8 {
-// 			log.Println("delay RequestVote")
-// 			time.Sleep(75 * time.Millisecond)
-// 		}
-// 	} else {
-// 		time.Sleep(time.Duration(1+rand.Intn(5)) * time.Millisecond)
-// 	}
-// 	return rpp.cm.RequestVote(args, reply)
-// }
+func (s *Server) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
+	return s.cm.RequestVoteHelper(req)
+}
 
-// func (rpp *RPCProxy) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
-// 	if len(os.Getenv("RAFT_UNRELIABLE_RPC")) > 0 {
-// 		dice := rand.Intn(10)
-// 		if dice == 9 {
-// 			log.Println("drop AppendEntries")
-// 			return fmt.Errorf("RPC failed")
-// 		} else if dice == 8 {
-// 			log.Println("delay AppendEntries")
-// 			time.Sleep(75 * time.Millisecond)
-// 		}
-// 	} else {
-// 		time.Sleep(time.Duration(1+rand.Intn(5)) * time.Millisecond)
-// 	}
-// 	return rpp.cm.AppendEntries(args, reply)
-// }
+func (s *Server) ForwardLeader(ctx context.Context, req *pb.ForwardLeaderRequest) (*pb.ForwardLeaderResponse, error) {
+	return s.cm.ForwardLeaderHelper(req)
+}
 
+func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
+	return s.cm.AppendEntriesHelper(req)
+}

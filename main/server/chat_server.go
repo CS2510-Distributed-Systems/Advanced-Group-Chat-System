@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	//badger storage
 )
@@ -36,16 +35,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	//create a cmux to multiplex between GRPC and net/rpc requests
-	mux := cmux.New(listener)
-	//match connections in order
-	// grpcL := mux.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
-	//first grpc, then go rpc
-	trpcL := mux.Match(cmux.Any())
-	//The gRPC server
+
 	grpcserver := grpc.NewServer()
 	//the go rpc (raft) server
-	raftserver := service.NewServer(int64(serverId), trpcL)
+	raftserver := service.NewServer(int64(serverId), listener)
 
 	//register the services
 	groupstore := service.NewInMemoryGroupStore()
@@ -54,12 +47,12 @@ func main() {
 	chatserver := service.NewChatServiceServer(groupstore, userstore, clients, raftserver)
 	pb.RegisterChatServiceServer(grpcserver, chatserver)
 	pb.RegisterAuthServiceServer(grpcserver, chatserver)
+	pb.RegisterRaftServiceServer(grpcserver, raftserver)
 
 	//Start Serving
 	raftserver.Serve()
 	grpcserver.Serve(listener)
 
-	mux.Serve()
 	//wait for all go routines to end
 	wg.Wait()
 

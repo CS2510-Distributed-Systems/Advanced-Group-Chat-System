@@ -35,10 +35,10 @@ func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*p
 	//construct command to sent to raft
 	event := "u"
 	command := &pb.Command{
-		Event: event,
+		Event:       event,
 		TriggeredBy: user_name,
 	}
-	
+
 	s.raft.cm.Submit(command)
 
 	log.Printf("Logging as: %v", user_name)
@@ -109,7 +109,7 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 		}
 		if err != nil {
 			log.Println("Error in Receive.")
-			
+
 			return err
 		}
 
