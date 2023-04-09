@@ -45,7 +45,7 @@ func main() {
 	//The gRPC server
 	grpcserver := grpc.NewServer()
 	//the go rpc (raft) server
-	raftserver := service.NewServer(serverId, trpcL)
+	raftserver := service.NewServer(int64(serverId), trpcL)
 
 	//register the services
 	groupstore := service.NewInMemoryGroupStore()
@@ -56,9 +56,8 @@ func main() {
 	pb.RegisterAuthServiceServer(grpcserver, chatserver)
 
 	//Start Serving
-
-	go grpcserver.Serve(trpcL)
-	go raftserver.Serve()
+	raftserver.Serve()
+	grpcserver.Serve(listener)
 
 	mux.Serve()
 	//wait for all go routines to end

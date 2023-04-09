@@ -40,9 +40,9 @@ type DiskStore struct {
 	replicatedlog *raftbadger.Storage
 }
 
-func NewDiskStore(serverId int) *DiskStore {
+func NewDiskStore(serverId int64) *DiskStore {
 	cfg_appdata := raftbadger.Config{
-		DataPath: "server/diskstore/server" + strconv.Itoa(serverId),
+		DataPath: "server/diskstore/server" + strconv.Itoa(int(serverId)),
 	}
 	diskstore, err := raftbadger.New(cfg_appdata, nil)
 	if err != nil {
@@ -50,7 +50,7 @@ func NewDiskStore(serverId int) *DiskStore {
 	}
 	//config for raft
 	cfg_raftdata := raftbadger.Config{
-		DataPath: "server/diskstore/server" + strconv.Itoa(serverId) + "/raft",
+		DataPath: "server/diskstore/server" + strconv.Itoa(int(serverId)) + "/raft",
 	}
 	raftdiskstore, err := raftbadger.New(cfg_raftdata, nil)
 	if err != nil {
@@ -82,7 +82,7 @@ func (store *DiskStore) SaveUser(user *pb.User) error {
 	return nil
 }
 
-func (store *DiskStore) SetState(currentTerm int, votedFor int, logs []LogEntry) error {
+func (store *DiskStore) SetState(currentTerm int64, votedFor int64, logs []*pb.LogEntry) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	//store term data
@@ -108,11 +108,11 @@ func (store *DiskStore) SetState(currentTerm int, votedFor int, logs []LogEntry)
 	return nil
 }
 
-func (store *DiskStore) GetState() (int, int, []LogEntry) {
+func (store *DiskStore) GetState() (int64, int64, []*pb.LogEntry) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	var term int
+	var term int64
 	if termData, err := store.replicatedlog.Get([]byte("currentTerm")); err == nil {
 		d := gob.NewDecoder(bytes.NewBuffer(termData))
 		if err := d.Decode(&term); err != nil {
@@ -121,7 +121,7 @@ func (store *DiskStore) GetState() (int, int, []LogEntry) {
 	} else {
 		log.Fatal("currentTerm not found in storage")
 	}
-	var votedFor int
+	var votedFor int64
 	if votedData, err := store.replicatedlog.Get([]byte("votedFor")); err == nil {
 		d := gob.NewDecoder(bytes.NewBuffer(votedData))
 		if err := d.Decode(&votedFor); err != nil {
@@ -130,7 +130,7 @@ func (store *DiskStore) GetState() (int, int, []LogEntry) {
 	} else {
 		log.Fatal("votedFor not found in storage")
 	}
-	var logs []LogEntry
+	var logs []*pb.LogEntry
 	if logData, err := store.replicatedlog.Get([]byte("log")); err == nil {
 		d := gob.NewDecoder(bytes.NewBuffer(logData))
 		if err := d.Decode(&logs); err != nil {

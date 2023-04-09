@@ -4,22 +4,22 @@
 package chat_server
 
 import (
+	"chat-system/pb"
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"net/rpc"
-	"os"
 	"strconv"
 	"sync"
-	"time"
 )
 
+
 type Server struct {
+	pb.UnimplementedRaftServiceServer
 	mu sync.Mutex
 
-	serverId int
-	peerIds  []int
+	serverId int64
+	peerIds  []int64
 
 	cm       *ConsensusModule
 	rpcProxy *RPCProxy
@@ -28,28 +28,28 @@ type Server struct {
 	listener  net.Listener
 
 	commitChan  chan<- CommitEntry
-	peerClients map[int]*rpc.Client
+	peerClients map[int64]*rpc.Client
 
 	ready chan int
 	quit  chan interface{}
 	wg    sync.WaitGroup
 }
 
-func NewServer(serverId int, Listener net.Listener) *Server {
+func NewServer(serverId int64, Listener net.Listener) *Server {
 
 	s := new(Server)
 	s.serverId = serverId
 
-	peerIds := make([]int, 0)
+	peerIds := make([]int64, 0)
 	for p := 1; p <= 5; p++ {
-		if p != serverId {
-			peerIds = append(peerIds, p)
+		if p != int(serverId) {
+			peerIds = append(peerIds, int64(p))
 		}
 	}
 	s.peerIds = peerIds
 
 	s.commitChan = make(chan CommitEntry, 10)
-	s.peerClients = make(map[int]*rpc.Client)
+	s.peerClients = make(map[int64]*rpc.Client)
 	go s.ConnectAllPeers(serverId)
 	s.listener = Listener
 
@@ -70,28 +70,8 @@ func NewServer(serverId int, Listener net.Listener) *Server {
 
 func (s *Server) Serve() {
 	log.Printf("[%v] listening at %s", s.serverId, s.listener.Addr())
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		//start raft
-		close(s.ready)
-		for {
-			conn, err := s.listener.Accept()
-			if err != nil {
-				select {
-				case <-s.quit:
-					return
-				default:
-					log.Fatal("accept error:", err)
-				}
-			}
-			s.wg.Add(1)
-			go func() {
-				s.rpcServer.ServeConn(conn)
-				s.wg.Done()
-			}()
-		}
-	}()
+	// s.wg.Add(1)
+	close(s.ready)
 }
 
 // closes all the client connections to peers for this server
@@ -120,14 +100,14 @@ func (s *Server) GetListenAddr() net.Addr {
 	return s.listener.Addr()
 }
 
-func (s *Server) GetPeerAddr(peerId int) string {
+func (s *Server) GetPeerAddr(peerId int64) string {
 	BASE_IP := "0.0.0.0"
-	port := ":1200" + strconv.Itoa(peerId)
+	port := ":1200" + strconv.Itoa(int(peerId))
 	addr := BASE_IP + port
 	return addr
 }
 
-func (s *Server) ConnectToPeer(peerId int, addr string) error {
+func (s *Server) ConnectToPeer(peerId int64, addr string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	client, err := rpc.Dial("tcp", addr)
@@ -139,14 +119,14 @@ func (s *Server) ConnectToPeer(peerId int, addr string) error {
 	return nil
 }
 
-func (s *Server) ReconnectToPeer(peerId int) error {
+func (s *Server) ReconnectToPeer(peerId int64) error {
 	log.Printf("Reconnecting to server %v", peerId)
 	addr := s.GetPeerAddr(peerId)
 	s.ConnectToPeer(peerId, addr)
 	return nil
 }
 
-func (s *Server) DisconnectPeer(peerId int) error {
+func (s *Server) DisconnectPeer(peerId int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.peerClients[peerId] != nil {
@@ -157,13 +137,14 @@ func (s *Server) DisconnectPeer(peerId int) error {
 	return nil
 }
 
-func (s *Server) ConnectAllPeers(serverId int) {
+func (s *Server) ConnectAllPeers(serverId int64) {
 	for {
 		for j := 1; j <= 5; j++ {
-			if serverId != j {
-				if s.peerClients[j] == nil {
-					addr := s.GetPeerAddr(j)
-					s.ConnectToPeer(j, addr)
+			if int(serverId) != j {
+				k := int64(j)
+				if s.peerClients[k] == nil {
+					addr := s.GetPeerAddr(k)
+					s.ConnectToPeer(k, addr)
 				}
 
 			}
@@ -172,7 +153,7 @@ func (s *Server) ConnectAllPeers(serverId int) {
 
 }
 
-func (s *Server) Call(id int, serviceMethod string, args interface{}, reply interface{}) error {
+func (s *Server) Call(id int64, serviceMethod string, args interface{}, reply interface{}) error {
 	s.mu.Lock()
 	peer := s.peerClients[id]
 	s.mu.Unlock()
@@ -188,34 +169,35 @@ type RPCProxy struct {
 	cm *ConsensusModule
 }
 
-func (rpp *RPCProxy) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
-	if len(os.Getenv("RAFT_UNRELIABLE_RPC")) > 0 {
-		dice := rand.Intn(10)
-		if dice == 9 {
-			log.Println("drop RequestVote")
-			return fmt.Errorf("RPC failed")
-		} else if dice == 8 {
-			log.Println("delay RequestVote")
-			time.Sleep(75 * time.Millisecond)
-		}
-	} else {
-		time.Sleep(time.Duration(1+rand.Intn(5)) * time.Millisecond)
-	}
-	return rpp.cm.RequestVote(args, reply)
-}
+// func (rpp *RPCProxy) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
+// 	if len(os.Getenv("RAFT_UNRELIABLE_RPC")) > 0 {
+// 		dice := rand.Intn(10)
+// 		if dice == 9 {
+// 			log.Println("drop RequestVote")
+// 			return fmt.Errorf("RPC failed")
+// 		} else if dice == 8 {
+// 			log.Println("delay RequestVote")
+// 			time.Sleep(75 * time.Millisecond)
+// 		}
+// 	} else {
+// 		time.Sleep(time.Duration(1+rand.Intn(5)) * time.Millisecond)
+// 	}
+// 	return rpp.cm.RequestVote(args, reply)
+// }
 
-func (rpp *RPCProxy) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
-	if len(os.Getenv("RAFT_UNRELIABLE_RPC")) > 0 {
-		dice := rand.Intn(10)
-		if dice == 9 {
-			log.Println("drop AppendEntries")
-			return fmt.Errorf("RPC failed")
-		} else if dice == 8 {
-			log.Println("delay AppendEntries")
-			time.Sleep(75 * time.Millisecond)
-		}
-	} else {
-		time.Sleep(time.Duration(1+rand.Intn(5)) * time.Millisecond)
-	}
-	return rpp.cm.AppendEntries(args, reply)
-}
+// func (rpp *RPCProxy) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
+// 	if len(os.Getenv("RAFT_UNRELIABLE_RPC")) > 0 {
+// 		dice := rand.Intn(10)
+// 		if dice == 9 {
+// 			log.Println("drop AppendEntries")
+// 			return fmt.Errorf("RPC failed")
+// 		} else if dice == 8 {
+// 			log.Println("delay AppendEntries")
+// 			time.Sleep(75 * time.Millisecond)
+// 		}
+// 	} else {
+// 		time.Sleep(time.Duration(1+rand.Intn(5)) * time.Millisecond)
+// 	}
+// 	return rpp.cm.AppendEntries(args, reply)
+// }
+

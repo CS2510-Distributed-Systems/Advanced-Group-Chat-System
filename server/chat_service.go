@@ -34,10 +34,12 @@ func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*p
 	user_name := req.User.Name
 	//construct command to sent to raft
 	event := "u"
-	command := NewCommand()
-	command.Event = event
-	command.Triggeredby = user_name
-	s.raft.cm.Submit(*command)
+	command := &pb.Command{
+		Event: event,
+		TriggeredBy: user_name,
+	}
+	
+	s.raft.cm.Submit(command)
 
 	log.Printf("Logging as: %v", user_name)
 	newUser := &pb.User{
