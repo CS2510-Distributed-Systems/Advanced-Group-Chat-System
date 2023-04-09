@@ -47,7 +47,7 @@ func NewServer(serverId int64, Listener net.Listener) *Server {
 
 	s.commitChan = make(chan CommitEntry, 10)
 	s.peerClients = make(map[int64]*grpc.ClientConn)
-	go s.ConnectAllPeers(serverId)
+	s.ConnectAllPeers(serverId)
 	s.listener = Listener
 
 	s.ready = make(chan int, 10)

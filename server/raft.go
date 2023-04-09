@@ -183,11 +183,14 @@ func (cm *ConsensusModule) Submit(command *pb.Command) bool {
 		cm.persistToStorage()
 		log.Printf("... log=%v", cm.log)
 		cm.mu.Unlock()
-		cm.triggerAEChan <- struct{}{}
+		// cm.triggerAEChan <- struct{}{}
 		return true
-	} else {
+	} else if cm.leaderid != -1 {
 		cm.forwardToLeader(command)
 
+	} else {
+		//add the commit code here
+		return true
 	}
 	return false
 }
@@ -349,7 +352,7 @@ func (cm *ConsensusModule) runElectionTimer() {
 	//1. When election timer is no longer needed
 	//2. Election timer expires and CM becomes a condidate
 	//for a follower, this keeps ticking for lifetime
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
@@ -438,14 +441,13 @@ func (cm *ConsensusModule) startElection() {
 						votesReceived += 1
 						if votesReceived*2 > len(cm.peerIds)+1 {
 							log.Printf("Wins election with %d other votes", votesReceived-1)
-							cm.startLeader()
+							go cm.startLeader()
 							return
 						}
 					}
 				}
 			} else {
-				log.Print(err)
-				// cm.server.ReconnectToPeer(peerId)
+				log.Printf("Connection failed to peer %v", peerId)
 			}
 
 		}(peerId)
@@ -479,54 +481,27 @@ func (cm *ConsensusModule) startLeader() {
 	// This goroutine runs in the background and sends AEs to peers:
 	// * Whenever something is sent on triggerAEChan
 	// * ... Or every 50 ms, if no events occur on triggerAEChan
-	go func(heartbeatTimeout time.Duration) {
-		// Immediately send AEs to peers.
-		cm.leaderSendAEs()
-		log.Printf("Inside the Leader go routine.Please work")
 
-		t := time.NewTimer(heartbeatTimeout)
-		defer t.Stop()
+	go func() {
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+
+		// Send periodic heartbeats, as long as still leader.
 		for {
-			log.Printf("Inside the for loop of the startleader")
-			doSend := false
-			select {
-			case <-t.C:
-				doSend = true
+			time.Sleep(50 * time.Millisecond)
+			cm.leaderSendAEs()
+			log.Println("IT is here after one call")
+			<-ticker.C
 
-				// Reset timer to fire again after heartbeatTimeout.
-				t.Stop()
-				t.Reset(heartbeatTimeout)
-			case _, ok := <-cm.triggerAEChan:
-				log.Println(ok)
-				if ok {
-					log.Println("dosend is true cuz of ok")
-					doSend = true
-				} else {
-					log.Println("Inside Else of ok")
-					return
-				}
-
-				// Reset timer for heartbeatTimeout.
-				if !t.Stop() {
-					<-t.C
-				}
-				t.Reset(heartbeatTimeout)
+			cm.mu.Lock()
+			if cm.state != Leader {
+				log.Printf("This changed from leader")
+				cm.mu.Unlock()
+				return
 			}
-
-			if doSend {
-				// If this isn't a leader any more, stop the heartbeat loop.
-				log.Printf("inside dosend1..")
-				cm.mu.Lock()
-				if cm.state != Leader {
-					log.Printf("inside dosend state is not leader anymore")
-					cm.mu.Unlock()
-					return
-				}
-				log.Printf("inside dosend2..")
-				cm.leaderSendAEs()
-			}
+			cm.mu.Unlock()
 		}
-	}(50 * time.Millisecond)
+	}()
 }
 
 func (cm *ConsensusModule) forwardToLeader(command *pb.Command) {
@@ -674,6 +649,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 			}
 		}(peerId)
 	}
+	log.Printf("Leader Send AE's finished")
 }
 
 func (cm *ConsensusModule) commitChanSender() {
