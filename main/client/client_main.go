@@ -7,14 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 
 	// "time"
 	"strings"
 
-	"github.com/hashicorp/yamux"
 	"google.golang.org/grpc"
 
 	"google.golang.org/grpc/credentials/insecure"
@@ -68,17 +66,6 @@ func connectClient(server_address string, port string) error {
 		log.Fatal("cannot dial the server", err)
 		return errors.New("Please provide correct address")
 	}
-
-	session, err := yamux.Client(conn, nil)
-	if err != nil {
-        panic(err)
-    }
-
-	// Open a new stream
-    stream, err := session.Open()
-    if err != nil {
-        panic(err)
-    }
 
 	log.Printf("Dialing to server %s:%v", server_address, port)
 	log.Printf("Target : %v :%v ", conn.GetState(), conn.Target())
