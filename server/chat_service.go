@@ -107,6 +107,7 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 		}
 		if err != nil {
 			log.Println("Error in Receive.")
+			
 			return err
 		}
 

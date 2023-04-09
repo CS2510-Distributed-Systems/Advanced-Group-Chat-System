@@ -39,12 +39,13 @@ func main() {
 	//create a cmux to multiplex between GRPC and net/rpc requests
 	mux := cmux.New(listener)
 	//match connections in order
+	// grpcL := mux.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
 	//first grpc, then go rpc
 	trpcL := mux.Match(cmux.Any())
 	//The gRPC server
 	grpcserver := grpc.NewServer()
 	//the go rpc (raft) server
-	raftserver := service.NewServer(serverId, listener)
+	raftserver := service.NewServer(serverId, trpcL)
 
 	//register the services
 	groupstore := service.NewInMemoryGroupStore()
@@ -55,12 +56,11 @@ func main() {
 	pb.RegisterAuthServiceServer(grpcserver, chatserver)
 
 	//Start Serving
+
 	go grpcserver.Serve(trpcL)
-	// raftserver.Serve()
 	go raftserver.Serve()
 
 	mux.Serve()
-
 	//wait for all go routines to end
 	wg.Wait()
 

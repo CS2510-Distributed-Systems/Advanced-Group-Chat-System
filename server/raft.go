@@ -152,10 +152,12 @@ func NewConsensusModule(id int, peerIds []int, server *Server, ready <-chan int,
 	go func() {
 		//the CM will be inactive until ready is signaled ,then it starts a countdown
 		<-ready
-		cm.mu.Lock()
-		cm.electionResetEvent = time.Now()
-		cm.mu.Unlock()
-		cm.runElectionTimer()
+		for {
+			cm.mu.Lock()
+			cm.electionResetEvent = time.Now()
+			cm.mu.Unlock()
+			cm.runElectionTimer()
+		}
 
 	}()
 
@@ -244,7 +246,7 @@ func (cm *ConsensusModule) RequestVote(args RequestVoteArgs, reply *RequestVoteR
 
 	reply.Term = cm.currentTerm
 	cm.persistToStorage()
-	log.Printf("Requestvote Reply : %v", reply)
+	log.Printf("Requestvote Reply of %v: %v", cm.server.serverId, reply)
 	return nil
 }
 
@@ -374,7 +376,7 @@ func (cm *ConsensusModule) runElectionTimer() {
 	cm.mu.Lock()
 	termStarted := cm.currentTerm
 	cm.mu.Unlock()
-	// log.Printf("Election time started (%v), term=%d", timeoutDuration, termStarted)
+	log.Printf("Election time started (%v), term=%d", timeoutDuration, termStarted)
 
 	//This loops until
 	//1. When election timer is no longer needed
@@ -388,13 +390,13 @@ func (cm *ConsensusModule) runElectionTimer() {
 		cm.mu.Lock()
 		//if its a leader . stop the timer
 		if cm.state != Candidate && cm.state != Follower {
-			log.Printf("in election timer state= %s, bailing out", cm.state)
+			log.Printf("in election timer, state= %s, bailing out as Im the leader already", cm.state)
 			return
 		}
 
 		//if terms dont match. stop the timer
 		if termStarted != cm.currentTerm {
-			log.Printf("in election timer term changed from %d to %d, bailing out", termStarted, cm.currentTerm)
+			log.Printf("in election timer, term changed from %d to %d, bailing out", termStarted, cm.currentTerm)
 			cm.mu.Unlock()
 			return
 		}
@@ -416,7 +418,7 @@ func (cm *ConsensusModule) startElection() {
 	savedCurrentTerm := cm.currentTerm
 	cm.electionResetEvent = time.Now()
 	cm.votedFor = cm.id
-	// log.Printf("becomes Candidate (currentTerm=%d); log= %v", savedCurrentTerm, cm.log)
+	log.Printf("becomes Candidate (currentTerm=%d); log= %v", savedCurrentTerm, cm.log)
 
 	votesReceived := 1
 
@@ -435,7 +437,7 @@ func (cm *ConsensusModule) startElection() {
 			}
 			var reply RequestVoteReply
 
-			// log.Printf("Sending RequestVote to %d: %+v", peerId, args)
+			log.Printf("Sending RequestVote to %d: %+v", peerId, args)
 			if err := cm.server.Call(peerId, "ConsensusModule.RequestVote", args, &reply); err == nil {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
@@ -460,7 +462,7 @@ func (cm *ConsensusModule) startElection() {
 					if reply.VoteGranted {
 						votesReceived += 1
 						if votesReceived*2 > len(cm.peerIds)+1 {
-							log.Printf("Wins election with %d votes", votesReceived)
+							log.Printf("Wins election with %d other votes", votesReceived-1)
 							cm.startLeader()
 							return
 						}
@@ -469,6 +471,8 @@ func (cm *ConsensusModule) startElection() {
 			} else if cm.server.peerClients[peerId] != nil {
 				log.Printf("Seems like Peer %v disconnected. Removing from peer client list.", peerId)
 				cm.server.peerClients[peerId] = nil
+			} else {
+				log.Printf("Election failed")
 			}
 		}(peerId)
 	}
@@ -504,10 +508,12 @@ func (cm *ConsensusModule) startLeader() {
 	go func(heartbeatTimeout time.Duration) {
 		// Immediately send AEs to peers.
 		cm.leaderSendAEs()
+		log.Printf("Inside the Leader go routine.Please work")
 
 		t := time.NewTimer(heartbeatTimeout)
 		defer t.Stop()
 		for {
+			log.Printf("Inside the for loop of the startleader")
 			doSend := false
 			select {
 			case <-t.C:
@@ -517,9 +523,12 @@ func (cm *ConsensusModule) startLeader() {
 				t.Stop()
 				t.Reset(heartbeatTimeout)
 			case _, ok := <-cm.triggerAEChan:
+				log.Println(ok)
 				if ok {
+					log.Println("dosend is true cuz of ok")
 					doSend = true
 				} else {
+					log.Println("Inside Else of ok")
 					return
 				}
 
@@ -532,12 +541,14 @@ func (cm *ConsensusModule) startLeader() {
 
 			if doSend {
 				// If this isn't a leader any more, stop the heartbeat loop.
+				log.Printf("inside dosend1..")
 				cm.mu.Lock()
 				if cm.state != Leader {
+					log.Printf("inside dosend state is not leader anymore")
 					cm.mu.Unlock()
 					return
 				}
-				cm.mu.Unlock()
+				log.Printf("inside dosend2..")
 				cm.leaderSendAEs()
 			}
 		}
@@ -574,7 +585,7 @@ func (cm *ConsensusModule) forwardToLeader(command Command) {
 					cm.forwardToLeader(command)
 				}
 			} else {
-				log.Printf("Seems like Peer disconnected. Removing from peer client list.")
+				log.Printf("Seems like Peer %v disconnected. Removing from peer client list.", leader)
 				cm.server.peerClients[leader] = nil
 			}
 		}()
@@ -582,9 +593,10 @@ func (cm *ConsensusModule) forwardToLeader(command Command) {
 	}
 }
 
-// leaderSendAEs sends a round of AEs to all peers, collects their
+// sends a round of AEs to all peers, collects their
 // replies and adjusts cm's state.
 func (cm *ConsensusModule) leaderSendAEs() {
+	log.Printf("inside leaderSendAEs1..")
 	cm.mu.Lock()
 	if cm.state != Leader {
 		cm.mu.Unlock()
@@ -594,6 +606,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 	cm.mu.Unlock()
 
 	for _, peerId := range cm.peerIds {
+		log.Printf("inside peerids for loop..")
 		go func(peerId int) {
 			cm.mu.Lock()
 			ni := cm.nextIndex[peerId]
@@ -619,6 +632,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
 				//As we got a response check if the peer is connected to the cm.
+				log.Printf("AppendEntries reply from %d !success: nextIndex := %d", peerId, ni-1)
 				if cm.server.peerClients[peerId] == nil {
 					log.Printf("Peer %v connected back.", peerId)
 					cm.server.ReconnectToPeer(peerId)
@@ -630,6 +644,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 				}
 
 				if cm.state == Leader && savedCurrentTerm == reply.Term {
+					//if the append entry is accepted by the follower
 					if reply.Success {
 						cm.nextIndex[peerId] = ni + len(entries)
 						cm.matchIndex[peerId] = cm.nextIndex[peerId] - 1
@@ -654,8 +669,8 @@ func (cm *ConsensusModule) leaderSendAEs() {
 							// Commit index changed: the leader considers new entries to be
 							// committed. Send new entries on the commit channel to this
 							// leader's clients, and notify followers by sending them AEs.
-							cm.newCommitReadyChan <- struct{}{}
-							cm.triggerAEChan <- struct{}{}
+							// cm.newCommitReadyChan <- struct{}{}
+							// cm.triggerAEChan <- struct{}{}
 						}
 					} else {
 						if reply.ConflictTerm >= 0 {
@@ -674,7 +689,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 						} else {
 							cm.nextIndex[peerId] = reply.ConflictIndex
 						}
-						log.Printf("AppendEntries reply from %d !success: nextIndex := %d", peerId, ni-1)
+
 					}
 				}
 			} else if cm.server.peerClients[peerId] != nil {

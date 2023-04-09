@@ -50,7 +50,7 @@ func NewServer(serverId int, Listener net.Listener) *Server {
 
 	s.commitChan = make(chan CommitEntry, 10)
 	s.peerClients = make(map[int]*rpc.Client)
-	s.ConnectAllPeers(serverId)
+	go s.ConnectAllPeers(serverId)
 	s.listener = Listener
 
 	s.ready = make(chan int, 10)
@@ -73,6 +73,7 @@ func (s *Server) Serve() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		//start raft
 		close(s.ready)
 		for {
 			conn, err := s.listener.Accept()
@@ -157,14 +158,18 @@ func (s *Server) DisconnectPeer(peerId int) error {
 }
 
 func (s *Server) ConnectAllPeers(serverId int) {
-	for i := 1; i <= 5; i++ {
+	for {
 		for j := 1; j <= 5; j++ {
-			if i != j {
-				addr := s.GetPeerAddr(j)
-				s.ConnectToPeer(j, addr)
+			if serverId != j {
+				if s.peerClients[j] == nil {
+					addr := s.GetPeerAddr(j)
+					s.ConnectToPeer(j, addr)
+				}
+
 			}
 		}
 	}
+
 }
 
 func (s *Server) Call(id int, serviceMethod string, args interface{}, reply interface{}) error {
