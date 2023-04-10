@@ -8,9 +8,11 @@ import "chat.proto";
 
 message Command {
   string Event = 1;
-  string TriggeredBy = 2;
-  string TriggeredGroup = 3;
-  ChatMessage ChatMessage = 4;
+  uint32 UserId = 2;
+  string User = 3;
+  string Group = 4;
+  string NewGroup = 5;
+  ChatMessage ChatMessage = 6;
 }
 
 message LogEntry {

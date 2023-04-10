@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -35,20 +34,13 @@ func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*p
 	//construct command to sent to raft
 	event := "u"
 	command := &pb.Command{
-		Event:       event,
-		TriggeredBy: user_name,
-	}
-
-	s.raft.cm.Submit(command)
-
-	log.Printf("Logging as: %v", user_name)
-	newUser := &pb.User{
-		Id:   uuid.New().ID(),
-		Name: user_name,
+		Event:  event,
+		User:   user_name,
+		UserId: req.User.Id,
 	}
 	res := &pb.LoginResponse{}
-
-	if err := s.raft.cm.storage.SaveUser(newUser); err == nil {
+	if s.raft.cm.Submit(command) {
+		log.Printf("Logging as: %v", user_name)
 		res = &pb.LoginResponse{
 			User: req.GetUser(),
 		}
@@ -63,11 +55,13 @@ func (s *ChatServiceServer) Logout(ctx context.Context, req *pb.LogoutRequest) (
 	userID := req.Logout.User.Id
 	groupname := req.Logout.Groupname
 	//delete user from userlist
-	s.userstore.DeleteUser(userID)
+	// s.userstore.DeleteUser(userID)
+	s.raft.cm.storage.DeleteUser(userID)
 
 	//delete user from grouplist
 	if groupname != "" {
-		s.groupstore.RemoveUser(userID, groupname)
+		// s.groupstore.RemoveUser(userID, groupname)
+		s.raft.cm.storage.RemoveUserInGroup(userID, groupname)
 		log.Printf("Removed %v from %v group", username, groupname)
 		currclient := [2]string{groupname, username}
 
@@ -126,8 +120,9 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 		}
 
 		//prepare a response
+		group, _ := s.raft.cm.storage.GetGroup(groupname)
 		resp := &pb.GroupChatResponse{
-			Group:   s.groupstore.GetGroup(groupname),
+			Group:   group,
 			Command: command,
 		}
 
@@ -190,26 +185,33 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 		return unlikemessage.Group.Groupname, command
 
 	case *pb.GroupChatRequest_Joinchat:
-		command := "j"
 		user := req.GetJoinchat().User
 		currgroupname := req.GetJoinchat().Currgroup
 		newgroupname := req.GetJoinchat().Newgroup
 		currclient := [2]string{currgroupname, user.Name}
-
 		//remove the current client stream
 		s.clients.RemoveConn(currclient)
 
 		//remove the user from the current group
 		s.groupstore.RemoveUser(user.Id, currgroupname)
 
-		// join a group
-		_, err := s.groupstore.JoinGroup(newgroupname, user)
-		if err != nil {
-			log.Printf("Failed to join group %v", err)
+		command := &pb.Command{
+			Event:    "j",
+			UserId:   user.Id,
+			User:     user.Name,
+			Group:    currgroupname,
+			NewGroup: newgroupname,
 		}
-		log.Printf("Joined group %s", newgroupname)
 
-		return newgroupname, command
+		if s.raft.cm.Submit(command) {
+			log.Printf("Joined group %s", newgroupname)
+
+			return newgroupname, command.Event
+
+		} else {
+			log.Printf("Failed to join the group.")
+			return currgroupname, command.Event
+		}
 
 	default:
 		log.Printf("let the client enter the command")

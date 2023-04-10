@@ -20,27 +20,11 @@ type Command struct {
 	Message        *pb.ChatMessage
 }
 
-func NewCommand() *Command {
-	return &Command{
-		Event:          "",
-		Triggeredby:    "",
-		Triggeredgroup: "",
-		Message: &pb.ChatMessage{
-			MessagedBy: &pb.User{
-				Id:   0,
-				Name: "",
-			},
-			Message: "",
-			LikedBy: make(map[string]string),
-		},
-	}
-}
-
 // Data reported by the raft to the commit channel. Each commit notifies that the consensus is achieved
 // on a command and it can be applied to the clients state machine.
 type CommitEntry struct {
 	//command being commited
-	Command Command
+	Command *pb.Command
 
 	//Log index where the client command is being commited
 	Index int64
@@ -98,11 +82,11 @@ type ConsensusModule struct {
 	//persistance storage of app data and raft data
 	storage *DiskStore
 
-	commitChan chan<- CommitEntry
+	commitChan chan CommitEntry
 
 	//internal notification channel used by go routines to notify that newly commited entries may be sent
 	//on commitChan
-	newCommitReadyChan chan struct{}
+	newCommitReadyChan chan int64
 
 	// triggerAEChan is an internal notification channel used to trigger
 	// sending new AEs to followers when interesting changes occurred.
@@ -126,7 +110,7 @@ type ConsensusModule struct {
 
 // new consensus module creation with the given ID, list of peerID's and server.
 // Ready channel signals CM that all the peers are connected and its safe to start
-func NewConsensusModule(id int64, peerIds []int64, server *Server, ready <-chan int, commitChan chan<- CommitEntry) *ConsensusModule {
+func NewConsensusModule(id int64, peerIds []int64, server *Server, ready <-chan int, commitChan chan CommitEntry) *ConsensusModule {
 	log.Printf("Initialising raft consensus..")
 	cm := new(ConsensusModule)
 	cm.id = id
@@ -134,8 +118,8 @@ func NewConsensusModule(id int64, peerIds []int64, server *Server, ready <-chan 
 	cm.peerIds = peerIds
 	cm.server = server
 	cm.commitChan = commitChan
-	cm.newCommitReadyChan = make(chan struct{}, 16)
-	cm.triggerAEChan = make(chan int, 0)
+	cm.newCommitReadyChan = make(chan int64, 16)
+	cm.triggerAEChan = make(chan int)
 	cm.state = Follower
 	cm.votedFor = -1
 	cm.lastApplied = -1
@@ -157,6 +141,7 @@ func NewConsensusModule(id int64, peerIds []int64, server *Server, ready <-chan 
 			cm.mu.Lock()
 			cm.electionResetEvent = time.Now()
 			cm.mu.Unlock()
+			go cm.commitEntries()
 			cm.runElectionTimer()
 		}
 
@@ -174,8 +159,8 @@ func (cm *ConsensusModule) Report() (id int64, term int64, isLeader bool) {
 }
 
 func (cm *ConsensusModule) Submit(command *pb.Command) bool {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	// cm.mu.Lock()
+	// defer cm.mu.Unlock()
 
 	log.Printf("Submit received by %v: %v", cm.state, command)
 	if cm.state == Leader {
@@ -184,7 +169,7 @@ func (cm *ConsensusModule) Submit(command *pb.Command) bool {
 		log.Printf("... log=%v", cm.log)
 		cm.triggerAEChan <- 1
 		return true
-	} else if cm.leaderid != -1 {
+	} else if cm.leaderid != -1 || cm.leaderid != cm.id {
 		cm.forwardToLeader(command)
 
 	} else {
@@ -250,15 +235,15 @@ func (cm *ConsensusModule) ForwardLeaderHelper(req *pb.ForwardLeaderRequest) (*p
 		return reply, nil
 	}
 
-	log.Printf("Forwarding the command to leader which is server: %v", cm.leaderid)
+	log.Printf("Got the client Command: %v", cm.leaderid)
 
 	reply.Success = false
 	//if cm is leader
 	if cm.state == Leader {
-		// if cm.Submit(req.Command) {
-		// 	reply.Success = true
-		// 	reply.Leaderid = cm.id
-		// }
+		if cm.Submit(req.Command) {
+			reply.Success = true
+			reply.LeaderId = cm.id
+		}
 		reply.Success = true
 		reply.LeaderId = cm.id
 	}
@@ -324,7 +309,7 @@ func (cm *ConsensusModule) AppendEntriesHelper(req *pb.AppendEntriesRequest) (*p
 			if req.LeaderCommit > cm.commitIndex {
 				cm.commitIndex = int64(intMin(int(req.LeaderCommit), len(cm.log)-1))
 				log.Printf("... setting commitIndex=%d", cm.commitIndex)
-				cm.newCommitReadyChan <- struct{}{}
+				cm.newCommitReadyChan <- 1
 			}
 		}
 	}
@@ -566,18 +551,14 @@ func (cm *ConsensusModule) forwardToLeader(command *pb.Command) {
 // sends a round of AEs to all peers, collects their
 // replies and adjusts cm's state.
 func (cm *ConsensusModule) leaderSendAEs() {
-	log.Printf("inside leaderSendAEs1..1")
 	cm.mu.Lock()
 	if cm.state != Leader {
-		log.Println("Why are you here")
 		cm.mu.Unlock()
 		return
 	}
 	savedCurrentTerm := cm.currentTerm
 	cm.mu.Unlock()
-	log.Printf("inside leaderSendAEs1..2")
 	for _, peerId := range cm.peerIds {
-		log.Printf("inside peerids for loop..")
 		go func(peerId int64) {
 			cm.mu.Lock()
 			ni := cm.nextIndex[int64(peerId)]
@@ -641,7 +622,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 							// Commit index changed: the leader considers new entries to be
 							// committed. Send new entries on the commit channel to this
 							// leader's clients, and notify followers by sending them AEs.
-							cm.newCommitReadyChan <- struct{}{}
+							cm.newCommitReadyChan <- int64(1)
 							cm.triggerAEChan <- 1
 						}
 					} else {
@@ -671,7 +652,6 @@ func (cm *ConsensusModule) leaderSendAEs() {
 		}(peerId)
 	}
 	log.Printf("Leader Send AE's finished")
-	return
 }
 
 func (cm *ConsensusModule) commitChanSender() {
@@ -681,10 +661,10 @@ func (cm *ConsensusModule) commitChanSender() {
 		savedTerm := cm.currentTerm
 		//get last applied index
 		savedLastApplied := cm.lastApplied
-		var entries []LogEntry
+		var entries []*pb.LogEntry
 		//if commit index is greater.. get the remaining log entries that need to be applied
 		if cm.commitIndex > cm.lastApplied {
-			// entries = cm.log[int(cm.lastApplied+1) : int(cm.commitIndex+1)]
+			entries = cm.log[cm.lastApplied+1 : cm.commitIndex+1]
 			cm.lastApplied = cm.commitIndex
 		}
 		cm.mu.Unlock()
@@ -697,11 +677,18 @@ func (cm *ConsensusModule) commitChanSender() {
 				Index:   savedLastApplied + int64(i+1),
 				Term:    savedTerm,
 			}
+
 		}
 	}
 	log.Printf("CommitChanSender done")
 }
 
+func (cm *ConsensusModule) commitEntries() {
+	for {
+		entry := <-cm.commitChan
+		cm.server.persistData(entry)
+	}
+}
 func intMin(a, b int) int {
 	if a < b {
 		return a

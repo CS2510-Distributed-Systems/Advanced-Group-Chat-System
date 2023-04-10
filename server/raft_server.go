@@ -25,7 +25,7 @@ type Server struct {
 	cm       *ConsensusModule
 	listener net.Listener
 
-	commitChan  chan<- CommitEntry
+	commitChan  chan CommitEntry
 	peerClients map[int64]*grpc.ClientConn
 
 	ready chan int
@@ -140,18 +140,39 @@ func (s *Server) ConnectAllPeers(serverId int64) {
 	}
 }
 
-type RPCProxy struct {
-	cm *ConsensusModule
-}
-
+// RPC for Requesting votes during raft Election
 func (s *Server) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
 	return s.cm.RequestVoteHelper(req)
 }
 
+// RPC to forward a client request to leader
 func (s *Server) ForwardLeader(ctx context.Context, req *pb.ForwardLeaderRequest) (*pb.ForwardLeaderResponse, error) {
 	return s.cm.ForwardLeaderHelper(req)
 }
 
+// RPC to send Entries to the Followers by the leader server
 func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
 	return s.cm.AppendEntriesHelper(req)
+}
+
+func (s *Server) persistData(logentry CommitEntry) {
+	command := logentry.Command
+	switch command.Event {
+	case "u":
+		user := &pb.User{
+			Id:   command.UserId,
+			Name: command.User,
+		}
+
+		s.cm.storage.SaveUser(user)
+	case "j":
+		user := s.cm.storage.GetUser(command.UserId)
+		s.cm.storage.RemoveUserInGroup(command.UserId, command.Group)
+		s.cm.storage.JoinGroup(command.NewGroup, user)
+	case "l":
+	case "r":
+	case "q":
+
+	}
+
 }
