@@ -155,20 +155,29 @@ func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest
 	return s.cm.AppendEntriesHelper(req)
 }
 
-func (s *Server) persistData(logentry CommitEntry) {
-	command := logentry.Command
+func (s *Server) persistData(commitentry CommitEntry) {
+	log.Printf("Data is persisiting...")
+	command := commitentry.Command
 	switch command.Event {
 	case "u":
+		log.Printf("Persisting User Login Event")
 		user := &pb.User{
 			Id:   command.UserId,
 			Name: command.User,
 		}
 
 		s.cm.storage.SaveUser(user)
+		return
 	case "j":
+		log.Printf("Persisting Group Join Event")
 		user := s.cm.storage.GetUser(command.UserId)
-		s.cm.storage.RemoveUserInGroup(command.UserId, command.Group)
-		s.cm.storage.JoinGroup(command.NewGroup, user)
+		log.Printf("Got the user from disk : %v", user)
+		if s.cm.storage.RemoveUserInGroup(command.UserId, command.Group) {
+			s.cm.storage.JoinGroup(command.NewGroup, user)
+			log.Printf("Joined succesfully")
+		}
+
+		return
 	case "l":
 	case "r":
 	case "q":

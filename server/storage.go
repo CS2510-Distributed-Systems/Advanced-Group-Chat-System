@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jinzhu/copier"
 	raftbadger "github.com/rfyiamcool/raft-badger"
-	"google.golang.org/protobuf/proto"
 )
 
 type Storage interface {
@@ -70,20 +69,18 @@ func (store *DiskStore) SaveUser(user *pb.User) error {
 		return fmt.Errorf("error while deepcopy user: %w", err)
 	}
 
-	newuser, err := proto.Marshal(usercopy)
-	if err != nil {
-		log.Fatal("marshaling error: ", err)
+	var encoder bytes.Buffer
+	if err := gob.NewEncoder(&encoder).Encode(usercopy); err != nil {
+		log.Fatal(err)
 	}
-
-	Id := usercopy.GetId()
-	err = store.diskstore.Set([]byte(strconv.Itoa(int(Id))), newuser)
+	err = store.diskstore.Set([]byte(strconv.Itoa(int(usercopy.Id))), encoder.Bytes())
 	checkError(err)
 
 	log.Printf("user %v logged in the server.User stored in the disk", user.GetName())
 	return nil
 }
 
-func (store *DiskStore) GetUser(userId uint32) (*pb.User){
+func (store *DiskStore) GetUser(userId uint32) *pb.User {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	var user *pb.User
@@ -113,31 +110,42 @@ func (store *DiskStore) GetGroup(groupname string) (*pb.Group, bool) {
 			return group, false
 		}
 	} else {
-		log.Println("currentTerm not found in storage")
-		return group, false
+		log.Println("group not found in storage")
+		return nil, false
 	}
 	return group, true
 }
 
 func (store *DiskStore) UpdateGroup(groupname string, group *pb.Group) bool {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	groupcopy := &pb.Group{}
+	err := copier.Copy(groupcopy, group)
+	if err != nil {
+		return false
+	}
+	log.Printf("Deep copy of group is %v", groupcopy)
 	var encoder bytes.Buffer
-	if err := gob.NewEncoder(&encoder).Encode(group); err != nil {
+	if err := gob.NewEncoder(&encoder).Encode(groupcopy); err != nil {
 		log.Fatal(err)
 	}
-	err := store.diskstore.Set([]byte(groupname), encoder.Bytes())
+	err = store.diskstore.Set([]byte(groupname), encoder.Bytes())
 	checkError(err)
 	log.Println("Group info updated successfully in the disk")
 	return true
 }
 
-func (store *DiskStore) JoinGroup(groupname string, user *pb.User) (*pb.Group, error) {
-	store.mu.Lock()
-	defer store.mu.Unlock()
+func (store *DiskStore) JoinGroup(groupname string, user *pb.User) {
 
 	group, found := store.GetGroup(groupname)
 	if found {
 		group.Participants[user.GetId()] = user.GetName()
-		return group, nil
+		log.Printf("updated group with the participants %v", group)
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("user %v joined %v group", user.GetName(), groupname)
+			return
+		}
+
 	}
 	//if not found create one
 	new_group := &pb.Group{
@@ -146,11 +154,14 @@ func (store *DiskStore) JoinGroup(groupname string, user *pb.User) (*pb.Group, e
 		Participants: make(map[uint32]string),
 		Messages:     make(map[uint32]*pb.ChatMessage),
 	}
+	new_group.Participants[user.GetId()] = user.GetName()
+	log.Printf("Added participant to %v", new_group)
 	if store.UpdateGroup(groupname, new_group) {
 		log.Printf("user %v joined %v group", user.GetName(), groupname)
-		return new_group, nil
+		return
+	} else {
+		log.Println(" Failed to update the group")
 	}
-	return nil, nil
 }
 
 func (store *DiskStore) RemoveUserInGroup(userID uint32, groupname string) bool {
@@ -161,8 +172,13 @@ func (store *DiskStore) RemoveUserInGroup(userID uint32, groupname string) bool 
 		}
 		delete(group.Participants, userID)
 		if store.UpdateGroup(groupname, group) {
+			log.Printf("removed user from current group if any")
 			return true
+
 		}
+	} else {
+		log.Printf("Group is not present in disk yet.")
+		return true
 	}
 	return false
 }

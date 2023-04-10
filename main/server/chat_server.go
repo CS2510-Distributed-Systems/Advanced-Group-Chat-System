@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"google.golang.org/grpc"
-	//badger storage
+	//badger storea
 )
 
 func main() {
@@ -37,6 +37,7 @@ func main() {
 	}
 
 	grpcserver := grpc.NewServer()
+
 	//the go rpc (raft) server
 	raftserver := service.NewServer(int64(serverId), listener)
 

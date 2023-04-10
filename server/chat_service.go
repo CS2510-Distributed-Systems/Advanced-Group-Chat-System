@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -120,7 +121,9 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 		}
 
 		//prepare a response
+		time.Sleep(200 * time.Millisecond)
 		group, _ := s.raft.cm.storage.GetGroup(groupname)
+		log.Printf("Here after all the processing group details : %v", group)
 		resp := &pb.GroupChatResponse{
 			Group:   group,
 			Command: command,
@@ -202,15 +205,11 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 			Group:    currgroupname,
 			NewGroup: newgroupname,
 		}
-
 		if s.raft.cm.Submit(command) {
 			log.Printf("Joined group %s", newgroupname)
 
-			return newgroupname, command.Event
+			return command.NewGroup, command.Event
 
-		} else {
-			log.Printf("Failed to join the group.")
-			return currgroupname, command.Event
 		}
 
 	default:
