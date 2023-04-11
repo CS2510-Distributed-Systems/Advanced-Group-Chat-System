@@ -28,8 +28,9 @@ type Server struct {
 	commitChan  chan CommitEntry
 	peerClients map[int64]*grpc.ClientConn
 
-	ready chan int
-	quit  chan interface{}
+	ready     chan int
+	quit      chan interface{}
+	broadcast chan string
 }
 
 func NewServer(serverId int64, Listener net.Listener) *Server {
@@ -52,7 +53,7 @@ func NewServer(serverId int64, Listener net.Listener) *Server {
 
 	s.ready = make(chan int, 10)
 	s.quit = make(chan interface{})
-
+	s.broadcast = make(chan string)
 	s.cm = NewConsensusModule(s.serverId, s.peerIds, s, s.ready, s.commitChan)
 
 	return s
@@ -167,19 +168,25 @@ func (s *Server) persistData(commitentry CommitEntry) {
 		if s.cm.storage.RemoveUserInGroup(joinchat.Joineduser.Id, joinchat.Currgroup) {
 			s.cm.storage.JoinGroup(joinchat.Newgroup, joinchat.Joineduser)
 		}
+		s.broadcast <- joinchat.Newgroup
 	case "a":
 		append := command.GetAppend()
 		s.cm.storage.AppendMessage(append)
+		s.broadcast <- append.Group.Groupname
 	case "l":
 		like := command.GetLike()
 		s.cm.storage.LikeMessage(like)
+		s.broadcast <- like.Group.Groupname
 	case "r":
 		unlike := command.GetUnlike()
 		s.cm.storage.UnLikeMessage(unlike)
+		s.broadcast <- unlike.Group.Groupname
 	case "q":
 		logout := command.GetLogout()
 		s.cm.storage.DeleteUser(logout.User.Id)
 		s.cm.storage.RemoveUserInGroup(logout.User.Id, logout.Currgroup)
+		s.broadcast <- logout.Currgroup
 	}
 
 }
+

@@ -42,10 +42,8 @@ func main() {
 	raftserver := service.NewServer(int64(serverId), listener)
 
 	//register the services
-	groupstore := service.NewInMemoryGroupStore()
 	clients := service.NewInMemoryConnStore()
-	userstore := service.NewInMemoryUserStore()
-	chatserver := service.NewChatServiceServer(groupstore, userstore, clients, raftserver)
+	chatserver := service.NewChatServiceServer(clients, raftserver)
 	pb.RegisterChatServiceServer(grpcserver, chatserver)
 	pb.RegisterAuthServiceServer(grpcserver, chatserver)
 	pb.RegisterRaftServiceServer(grpcserver, raftserver)

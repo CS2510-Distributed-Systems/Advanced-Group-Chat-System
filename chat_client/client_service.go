@@ -18,6 +18,8 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // client service
@@ -37,6 +39,7 @@ func NewChatServiceClient(chatservice pb.ChatServiceClient, authservice pb.AuthS
 
 // login rpc
 func UserLogin(user_name string, client *ChatServiceClient) error {
+
 	user := &pb.User{
 		Id:   uuid.New().ID(),
 		Name: user_name,
@@ -44,7 +47,6 @@ func UserLogin(user_name string, client *ChatServiceClient) error {
 	user_details := &pb.LoginRequest{
 		User: user,
 	}
-
 	_, err := client.authservice.Login(context.Background(), user_details)
 	if err != nil {
 		return err
@@ -57,6 +59,7 @@ func UserLogin(user_name string, client *ChatServiceClient) error {
 
 // logoutrpc to remove the user from the server
 func (client *ChatServiceClient) UserLogout() bool {
+
 	user := client.clientstore.GetUser()
 	groupname := client.clientstore.GetGroup().Groupname
 
@@ -86,11 +89,10 @@ func (client *ChatServiceClient) UserLogout() bool {
 // experiment rpc
 func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 
-	ctx := context.Background()
-
-	stream, err := client.chatservice.JoinGroupChat(ctx)
+	stream, err := client.chatservice.JoinGroupChat(context.Background())
 	if err != nil {
 		log.Fatalf("open stream error %v", err)
+		return
 	}
 
 	done := make(chan bool)
@@ -102,6 +104,10 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 	//go routine for receive
 	go func() {
 		for {
+			err := contextError(stream.Context())
+			if err != nil {
+				return
+			}
 			resp, err := stream.Recv()
 			if err == io.EOF {
 				log.Println("EOF error")
@@ -135,8 +141,8 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 			if err != nil {
 				log.Println("Client crashed inside the stream. Performing graceful shutdown")
 				return
-			} 
-			
+			}
+
 			//preparing request
 			req, command := client.ProcessMessage(msg)
 			if command == "q" {
@@ -320,4 +326,22 @@ func PrintAll(group *pb.Group) {
 		count++
 	}
 
+}
+
+func contextError(ctx context.Context) error {
+	switch ctx.Err() {
+	case context.Canceled:
+		return logError(status.Error(codes.Canceled, "request is canceled"))
+	case context.DeadlineExceeded:
+		return logError(status.Error(codes.DeadlineExceeded, "deadline is exceeded"))
+	default:
+		return nil
+	}
+}
+
+func logError(err error) error {
+	if err != nil {
+		log.Print(err)
+	}
+	return err
 }

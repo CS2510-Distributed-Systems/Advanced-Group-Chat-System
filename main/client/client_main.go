@@ -19,8 +19,9 @@ import (
 )
 
 func main() {
-	log.Println("Please specify server address to connect: ")
+
 	for {
+		log.Println("Please specify server address to connect: ")
 		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			log.Println("Error while reading command. Please try again.")
@@ -41,8 +42,7 @@ func main() {
 				address := server_address[0]
 				port := server_address[1]
 				connectClient(address, port)
-				return
-
+				continue
 			}
 		case "q":
 			log.Println("closed the program")

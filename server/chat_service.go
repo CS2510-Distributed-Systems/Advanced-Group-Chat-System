@@ -15,19 +15,17 @@ import (
 type ChatServiceServer struct {
 	pb.UnimplementedChatServiceServer
 	pb.UnimplementedAuthServiceServer
-	groupstore GroupStore
-	userstore  UserStore
-	clients    ConnStore
-	raft       *Server
+	connstore *InMemoryConnStore
+	raft      *Server
 }
 
-func NewChatServiceServer(groupstore GroupStore, userstore UserStore, clients ConnStore, raft *Server) *ChatServiceServer {
-	return &ChatServiceServer{
-		groupstore: groupstore,
-		userstore:  userstore,
-		clients:    clients,
-		raft:       raft,
+func NewChatServiceServer(clients *InMemoryConnStore, raft *Server) *ChatServiceServer {
+	chatserver := &ChatServiceServer{
+		connstore: clients,
+		raft:      raft,
 	}
+	go chatserver.BroadCast()
+	return chatserver
 }
 
 func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
@@ -77,6 +75,7 @@ func (s *ChatServiceServer) Logout(ctx context.Context, req *pb.LogoutRequest) (
 		resp = &pb.LogoutResponse{
 			Status: true,
 		}
+		s.raft.broadcast <- groupname
 	}
 
 	return resp, nil
@@ -114,7 +113,7 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 
 			//store the stream details
 			newclient := [2]string{groupname, user.Name}
-			s.clients.AddConn(stream, newclient)
+			s.connstore.AddConn(stream, newclient)
 		}
 
 		//prepare a response
@@ -126,7 +125,7 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 		}
 
 		//braodcast the change
-		s.clients.BroadCast(groupname, resp)
+		s.raft.broadcast <- groupname
 		if err := stream.Send(resp); err != nil {
 			log.Printf("Error in send stream: %v", err)
 		}
@@ -155,7 +154,6 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 		}
 		//submit to raft
 		if s.raft.cm.Submit(command) {
-			log.Printf("Message Appended.")
 			return command.GetAppend().Group.Groupname, event
 		}
 
@@ -175,7 +173,6 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 		}
 		//submit to raft
 		if s.raft.cm.Submit(command) {
-			log.Printf("Message liked.")
 			return command.GetLike().Group.Groupname, event
 		}
 
@@ -195,14 +192,13 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 		}
 		//submit to raft
 		if s.raft.cm.Submit(command) {
-			log.Printf("Message unliked.")
 			return command.GetUnlike().Group.Groupname, event
 		}
 
 	case *pb.GroupChatRequest_Joinchat:
 		event := "j"
 		//get the request payload
-		action := &pb.Command_Joinchat{
+		action := &pb.GroupChatRequest_Joinchat{
 			Joinchat: req.GetJoinchat(),
 		}
 
@@ -219,19 +215,46 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 		newgroupname := action.Joinchat.Newgroup
 		currclient := [2]string{currgroupname, user.Name}
 		//remove the current client stream
-		s.clients.RemoveConn(currclient)
-
-		//remove the user from the current group
-		s.groupstore.RemoveUser(user.Id, currgroupname)
+		s.connstore.RemoveConn(currclient)
 
 		if s.raft.cm.Submit(command) {
-			log.Printf("Joined group %s", newgroupname)
-
 			return newgroupname, event
 		}
 
+	case *pb.GroupChatRequest_Print:
+		event := "p"
+		//get the request payload
+		action := &pb.GroupChatRequest_Print{
+			Print: req.GetPrint(),
+		}
+
+		return action.Print.Groupname, event
 	}
+
 	return "", ""
+}
+
+// Broadcasts the respecitve group infos to the connected clients
+func (s *ChatServiceServer) BroadCast() {
+	for {
+		groupname := <-s.raft.broadcast
+		for stream, client := range s.connstore.clients {
+			if client[0] == groupname {
+				if stream.Context().Err() == context.Canceled || stream.Context().Err() == context.DeadlineExceeded {
+					delete(s.connstore.clients, stream)
+					continue
+				}
+				group, _ := s.raft.cm.storage.GetGroup(groupname)
+				resp := &pb.GroupChatResponse{
+					Group: group,
+					Event: "b",
+				}
+				stream.Send(resp)
+				log.Printf("Broadcasted succesfully to %v of %v group", client[1], client[0])
+			}
+		}
+	}
+
 }
 
 func contextError(ctx context.Context) error {

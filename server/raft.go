@@ -15,7 +15,7 @@ const DebugCM = 1
 // Command struct for the chat service application
 type Command struct {
 	Event   string
-	command *pb.Command
+	Command *pb.Command
 }
 
 // Data reported by the raft to the commit channel. Each commit notifies that the consensus is achieved
@@ -163,7 +163,7 @@ func (cm *ConsensusModule) Submit(command *pb.Command) bool {
 	if cm.state == Leader {
 		cm.log = append(cm.log, &pb.LogEntry{Command: command, Term: cm.currentTerm})
 		cm.persistToStorage()
-		log.Printf("... log=%v", cm.log)
+		// log.Printf("... log=%v", cm.log)
 		cm.triggerAEChan <- 1
 		cm.mu.Unlock()
 
@@ -230,7 +230,7 @@ func (cm *ConsensusModule) ForwardLeaderHelper(req *pb.ForwardLeaderRequest) (*p
 		return reply, nil
 	}
 
-	log.Printf("Got the client Command: %v", cm.leaderid)
+	log.Printf("Got the forwarded Command: %v", cm.leaderid)
 
 	reply.Success = false
 	//if cm is leader
@@ -297,9 +297,9 @@ func (cm *ConsensusModule) AppendEntriesHelper(req *pb.AppendEntriesRequest) (*p
 			// -newEntriesIndex points to the End of the entries, or an index
 			//where the term mismatches with the corresponding log entry
 			if newEntriesIndex < len(req.Entries) {
-				log.Printf("... inserting %v from index %d", req.Entries[newEntriesIndex:], logInsertIndex)
+				// log.Printf("... inserting %v from index %d", req.Entries[newEntriesIndex:], logInsertIndex)
 				cm.log = append(cm.log[:logInsertIndex], req.Entries[newEntriesIndex:]...)
-				log.Printf("... log is now: %v", cm.log)
+				// log.Printf("... log is now: %v", cm.log)
 			}
 
 			//set commit index

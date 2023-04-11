@@ -286,12 +286,12 @@ func (store *DiskStore) AppendMessage(appendchat *pb.AppendChat) {
 	if found {
 		appendmessagenumber := len(group.Messages)
 		group.Messages[uint32(appendmessagenumber)] = message
-
+		log.Printf("group %v: ", group)
 		if store.UpdateGroup(groupname, group) {
 			log.Printf("Appended new message in the group %v", group.Groupname)
 			return
 		}
-		
+
 	}
 }
 
@@ -299,6 +299,7 @@ func (store *DiskStore) LikeMessage(likemessage *pb.LikeMessage) {
 	groupname := likemessage.Group.Groupname
 	group, found := store.GetGroup(groupname)
 	if found {
+
 		likemessagenumber := likemessage.Messageid
 		//validate the message
 		message, found := group.Messages[likemessagenumber]
@@ -313,9 +314,13 @@ func (store *DiskStore) LikeMessage(likemessage *pb.LikeMessage) {
 		likedusername, found := message.LikedBy[likemessage.Likeduser.Name]
 		if found {
 			log.Printf("already Liked the message")
+			return
 		}
 
 		//like
+		if len(message.LikedBy) == 0 {
+			message.LikedBy = make(map[string]string)
+		}
 		message.LikedBy[likemessage.Likeduser.Name] = likedusername
 
 		if store.UpdateGroup(groupname, group) {
@@ -341,14 +346,14 @@ func (store *DiskStore) UnLikeMessage(unlikemessage *pb.UnLikeMessage) {
 			log.Printf("Cannot unLike own message")
 			return
 		}
-		unlikedusername, found := message.LikedBy[unlikemessage.Unlikeduser.Name]
+		_, found = message.LikedBy[unlikemessage.Unlikeduser.Name]
 		if !found {
-			log.Printf("already unliked the message")
+			log.Printf("its not liked")
+			return
 		}
 
 		//unlike
-		delete(message.LikedBy, unlikedusername)
-
+		delete(message.LikedBy, unlikemessage.Unlikeduser.Name)
 		if store.UpdateGroup(groupname, group) {
 			log.Printf("Unliked message in the group %v", group.Groupname)
 			return
