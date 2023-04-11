@@ -35,7 +35,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	grpcserver := grpc.NewServer()
 
 	//the go rpc (raft) server
@@ -43,7 +42,8 @@ func main() {
 
 	//register the services
 	clients := service.NewInMemoryConnStore()
-	chatserver := service.NewChatServiceServer(clients, raftserver)
+	activeusers := service.NewInMemoryActiveUsersStore()
+	chatserver := service.NewChatServiceServer(clients, activeusers, raftserver)
 	pb.RegisterChatServiceServer(grpcserver, chatserver)
 	pb.RegisterAuthServiceServer(grpcserver, chatserver)
 	pb.RegisterRaftServiceServer(grpcserver, raftserver)

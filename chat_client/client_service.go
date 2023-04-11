@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 
 	// "os"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/exp/maps"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -362,4 +364,26 @@ func logError(err error) error {
 		log.Print(err)
 	}
 	return err
+}
+
+func (client *ChatServiceClient) ConnectionHealthCheck(conn *grpc.ClientConn) {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		client.UserLogout()
+		os.Exit(1)
+	}()
+	go func() {
+		for {
+			state := conn.GetState().String()
+			if state != "READY" {
+				log.Printf("Inside the state shutdown")
+				os.Exit(1)
+				break
+
+			}
+
+		}
+	}()
 }

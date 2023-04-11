@@ -5,6 +5,8 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
+	"os/signal"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -15,17 +17,64 @@ import (
 type ChatServiceServer struct {
 	pb.UnimplementedChatServiceServer
 	pb.UnimplementedAuthServiceServer
-	connstore *InMemoryConnStore
-	raft      *Server
+	connstore        *InMemoryConnStore
+	activeusersstore *InMememoryActiveUsersStore
+	raft             *Server
 }
 
-func NewChatServiceServer(clients *InMemoryConnStore, raft *Server) *ChatServiceServer {
+func NewChatServiceServer(clients *InMemoryConnStore, activeusers *InMememoryActiveUsersStore, raft *Server) *ChatServiceServer {
 	chatserver := &ChatServiceServer{
-		connstore: clients,
-		raft:      raft,
+		connstore:        clients,
+		activeusersstore: activeusers,
+		raft:             raft,
 	}
 	go chatserver.BroadCast()
+	go chatserver.CheckServerHealth()
 	return chatserver
+}
+
+func (s *ChatServiceServer) CheckServerHealth() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	<-c
+	log.Printf("Server Crash observed. Removing the connected active users")
+	if s.RemoveActiveUsers() {
+		os.Exit(1)
+	}
+
+}
+
+func (s *ChatServiceServer) RemoveActiveUsers() bool {
+	log.Printf("activeuserschecking1..")
+	activeusers := s.activeusersstore.activeusers
+	log.Printf("activeuserschecking2..")
+	activeusersgroups := s.activeusersstore.activeusergroup
+	log.Printf("activeuserschecking3..")
+	log.Printf("activeusergroup : %v", activeusersgroups)
+	if len(activeusers) == 0 {
+		log.Printf("No active users Connected")
+		return true
+	}
+	log.Printf("activeuserschecking4..")
+	for _, user := range activeusers {
+		//construct commmand to raft
+		log.Printf("activeuserschecking5..")
+		log.Printf("Activeuser %v ", user)
+		command := &pb.Command{
+			Event: "q",
+			Action: &pb.Command_Logout{
+				Logout: &pb.Logout{
+					User:      user,
+					Currgroup: activeusersgroups[user.Id],
+				},
+			},
+		}
+		log.Printf("activeuserschecking6..")
+		if s.raft.cm.Submit(command) {
+			log.Printf("User %v logged out", user.Name)
+		}
+	}
+	return true
 }
 
 func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
@@ -38,6 +87,8 @@ func (s *ChatServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*p
 			Login: user,
 		},
 	}
+	//add user to in memory store
+	s.activeusersstore.AddUser(user, "")
 
 	resp := &pb.LoginResponse{}
 	//submit to raft
@@ -89,6 +140,7 @@ func (s *ChatServiceServer) ServerView(ctx context.Context, req *pb.ServerViewRe
 	}
 	return resp, nil
 }
+
 // Group Join Bidirectional RPC
 func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatServer) error {
 	log.Println("Received Join Group Request")
@@ -123,6 +175,10 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 			//store the stream details
 			newclient := [2]string{groupname, user.Name}
 			s.connstore.AddConn(stream, newclient)
+
+			//add the newly joined group details to inmemory active users
+			s.activeusersstore.AddUser(user, groupname)
+			//send a response
 			group, _ := s.raft.cm.storage.GetGroup(groupname)
 			resp := &pb.GroupChatResponse{
 				Group: group,
@@ -245,11 +301,7 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 			Print: req.GetPrint(),
 		}
 		return action.Print.Groupname, event
-	
-		
-		
 
-		
 	}
 
 	return "", ""

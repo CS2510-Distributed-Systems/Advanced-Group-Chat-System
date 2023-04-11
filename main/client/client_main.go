@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"time"
 
 	// "time"
@@ -34,8 +33,7 @@ func main() {
 		if len(argument) > 1 {
 			address = argument[1]
 		}
-		s := make(chan int, 1)
-		
+
 		switch command {
 		case "c":
 			if strings.TrimSpace(address) == "" {
@@ -44,16 +42,13 @@ func main() {
 				server_address := strings.Split(address, ":")
 				address := server_address[0]
 				port := server_address[1]
-				connectClient(address, port)
+				ConnectClient(address, port)
 				continue
 
 			}
 		case "q":
 			log.Println("closed the program")
 			return
-		default:
-			log.Println("Please provide correct command to proceed.")
-			continue
 		}
 
 	}
@@ -61,7 +56,7 @@ func main() {
 }
 
 // client
-func connectClient(server_address string, port string) {
+func ConnectClient(server_address string, port string) {
 	log.Printf("Dialing to server %s:%v", server_address, port)
 
 	// Connect to RPC server
@@ -72,32 +67,12 @@ func connectClient(server_address string, port string) {
 		return
 	}
 	serverId := int(server_address[len(server_address)-1])
-
-	log.Printf("Dialing to server %s:%v", server_address, port)
-	log.Printf("Target : %v :%v ", conn.GetState(), conn.Target())
 	clientstore := client.NewInMemoryClientStore()
 	chatclient := client.NewChatServiceClient(pb.NewChatServiceClient(conn), pb.NewAuthServiceClient(conn), clientstore, serverId)
 	time.Sleep(20 * time.Millisecond)
-	//Handling client crashing
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	go func() {
-		<-c
-		chatclient.UserLogout()
-		os.Exit(1)
-	}()
-	go func() {
-		for {
-			state := conn.GetState().String()
-			log.Printf("state %v:", state)
-			if state != "READY" {
-				log.Printf("Iside the state shutdown")
-				break
 
-			}
-
-		}
-	}()
+	//Handling client crashing amd server crashing
+	go chatclient.ConnectionHealthCheck(conn)
 
 	for {
 		//read input

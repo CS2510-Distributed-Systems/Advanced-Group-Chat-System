@@ -13,6 +13,19 @@ type ConnStore interface {
 	RemoveConn(client [2]string)
 }
 
+type InMememoryActiveUsersStore struct {
+	mutex           sync.RWMutex
+	activeusers     []*pb.User
+	activeusergroup map[uint32]string
+}
+
+func NewInMemoryActiveUsersStore() *InMememoryActiveUsersStore {
+	return &InMememoryActiveUsersStore{
+		activeusers:     make([]*pb.User,0),
+		activeusergroup: make(map[uint32]string),
+	}
+}
+
 type InMemoryConnStore struct {
 	mutex   sync.RWMutex
 	clients map[pb.ChatService_JoinGroupChatServer][2]string
@@ -22,6 +35,13 @@ func NewInMemoryConnStore() *InMemoryConnStore {
 	return &InMemoryConnStore{
 		clients: make(map[pb.ChatService_JoinGroupChatServer][2]string),
 	}
+}
+
+func (Activeusers *InMememoryActiveUsersStore) AddUser(user *pb.User, groupname string) {
+	log.Printf("Adding the user and his group to active users list")
+	Activeusers.activeusers = append(Activeusers.activeusers, user)
+	log.Printf("active users inside the store %v", Activeusers.activeusers)
+	Activeusers.activeusergroup[user.Id] = groupname
 }
 
 // adds an incoming conn in the server connstore
