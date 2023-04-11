@@ -196,7 +196,7 @@ func (group_master *InMemoryGroupStore) LikeMessage(likemessage *pb.LikeMessage)
 	defer group_master.mutex.Unlock()
 	groupname := likemessage.Group.GetGroupname()
 	likedmsgnumber := likemessage.GetMessageid()
-	likeduser := likemessage.User
+	likeduser := likemessage.Likeduser
 
 	//get the group
 	group := group_master.GetGroup(groupname)
@@ -228,7 +228,7 @@ func (group_master *InMemoryGroupStore) UnLikeMessage(unlikemessage *pb.UnLikeMe
 	defer group_master.mutex.Unlock()
 	groupname := unlikemessage.Group.GetGroupname()
 	unlikedmsgnumber := unlikemessage.GetMessageid()
-	unlikeduser := unlikemessage.User
+	unlikeduser := unlikemessage.Unlikeduser
 
 	//get the group
 	group := group_master.GetGroup(groupname)

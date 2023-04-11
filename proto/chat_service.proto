@@ -21,7 +21,7 @@ message GroupChatRequest {
 
 message GroupChatResponse {
   Group group = 1;
-  string command = 2;
+  string event = 2;
 }
 
 service ChatService {

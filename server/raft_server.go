@@ -145,7 +145,7 @@ func (s *Server) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*
 	return s.cm.RequestVoteHelper(req)
 }
 
-// RPC to forward a client request to leader
+// RPC to forward a chat client request to leader
 func (s *Server) ForwardLeader(ctx context.Context, req *pb.ForwardLeaderRequest) (*pb.ForwardLeaderResponse, error) {
 	return s.cm.ForwardLeaderHelper(req)
 }
@@ -156,32 +156,30 @@ func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest
 }
 
 func (s *Server) persistData(commitentry CommitEntry) {
-	log.Printf("Data is persisiting...")
+	log.Printf("Data is being written to disk")
 	command := commitentry.Command
 	switch command.Event {
 	case "u":
-		log.Printf("Persisting User Login Event")
-		user := &pb.User{
-			Id:   command.UserId,
-			Name: command.User,
-		}
-
+		user := command.GetLogin()
 		s.cm.storage.SaveUser(user)
-		return
 	case "j":
-		log.Printf("Persisting Group Join Event")
-		user := s.cm.storage.GetUser(command.UserId)
-		log.Printf("Got the user from disk : %v", user)
-		if s.cm.storage.RemoveUserInGroup(command.UserId, command.Group) {
-			s.cm.storage.JoinGroup(command.NewGroup, user)
-			log.Printf("Joined succesfully")
+		joinchat := command.GetJoinchat()
+		if s.cm.storage.RemoveUserInGroup(joinchat.Joineduser.Id, joinchat.Currgroup) {
+			s.cm.storage.JoinGroup(joinchat.Newgroup, joinchat.Joineduser)
 		}
-
-		return
+	case "a":
+		append := command.GetAppend()
+		s.cm.storage.AppendMessage(append)
 	case "l":
+		like := command.GetLike()
+		s.cm.storage.LikeMessage(like)
 	case "r":
+		unlike := command.GetUnlike()
+		s.cm.storage.UnLikeMessage(unlike)
 	case "q":
-
+		logout := command.GetLogout()
+		s.cm.storage.DeleteUser(logout.User.Id)
+		s.cm.storage.RemoveUserInGroup(logout.User.Id, logout.Currgroup)
 	}
 
 }

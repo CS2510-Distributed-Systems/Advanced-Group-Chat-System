@@ -20,12 +20,14 @@ type Storage interface {
 	DeleteUser(userID uint32)
 
 	//group data disk storage methods
-	GetGroup(groupname string) *pb.Group
-	JoinGroup(groupname string, user *pb.User) (*pb.Group, error)
-	AppendMessage(appendchat *pb.AppendChat) error
-	LikeMessage(like *pb.LikeMessage) error
-	UnLikeMessage(unlike *pb.UnLikeMessage) error
-	RemoveUser(userID uint32, groupname string)
+	GetGroup(string) (*pb.Group, bool)
+	JoinGroup(string, user *pb.User)
+	AppendMessage(*pb.AppendChat)
+	LikeMessage(*pb.LikeMessage)
+	UnLikeMessage(*pb.UnLikeMessage)
+	RemoveUser(uint32, string)
+	RemoveUserInGroup(uint32, string) bool
+	UpdateGroup(string, *pb.Group) bool
 
 	//raft replication log storage methods
 	SetState(int, int, []LogEntry) error
@@ -56,10 +58,23 @@ func NewDiskStore(serverId int64) *DiskStore {
 	if err != nil {
 		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
 	}
+	RegisterCommands()
 	return &DiskStore{
 		diskstore:     diskstore,
 		replicatedlog: raftdiskstore,
 	}
+}
+
+func RegisterCommands() {
+	gob.Register(&pb.Command{})
+	gob.Register(&pb.Command_Append{})
+	gob.Register(&pb.Command_Joinchat{})
+	gob.Register(&pb.Command_Like{})
+	gob.Register(&pb.Command_Unlike{})
+	gob.Register(&pb.Command_Print{})
+	gob.Register(&pb.Command_Login{})
+	gob.Register(&pb.Command_Logout{})
+
 }
 
 func (store *DiskStore) SaveUser(user *pb.User) error {
@@ -70,6 +85,7 @@ func (store *DiskStore) SaveUser(user *pb.User) error {
 	}
 
 	var encoder bytes.Buffer
+	// gob.Register(pb.User)
 	if err := gob.NewEncoder(&encoder).Encode(usercopy); err != nil {
 		log.Fatal(err)
 	}
@@ -201,9 +217,12 @@ func (store *DiskStore) SetState(currentTerm int64, votedFor int64, logs []*pb.L
 	store.replicatedlog.Set([]byte("votedFor"), votedData.Bytes())
 	//store the entire raftlog
 	var logData bytes.Buffer
+	// log.Printf("Trying to persist data2..")
+	gob.Register(logs)
 	if err := gob.NewEncoder(&logData).Encode(logs); err != nil {
 		log.Fatal(err)
 	}
+	// log.Printf("Trying to persist data3..")
 	store.replicatedlog.Set([]byte("log"), logData.Bytes())
 
 	return nil
@@ -258,7 +277,84 @@ func (store *DiskStore) HasData() bool {
 	}
 
 	return len(logs) > 0
+}
 
+func (store *DiskStore) AppendMessage(appendchat *pb.AppendChat) {
+	groupname := appendchat.Group.Groupname
+	message := appendchat.Chatmessage
+	group, found := store.GetGroup(groupname)
+	if found {
+		appendmessagenumber := len(group.Messages)
+		group.Messages[uint32(appendmessagenumber)] = message
+
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("Appended new message in the group %v", group.Groupname)
+			return
+		}
+		
+	}
+}
+
+func (store *DiskStore) LikeMessage(likemessage *pb.LikeMessage) {
+	groupname := likemessage.Group.Groupname
+	group, found := store.GetGroup(groupname)
+	if found {
+		likemessagenumber := likemessage.Messageid
+		//validate the message
+		message, found := group.Messages[likemessagenumber]
+		if !found {
+			log.Printf("Message not found")
+			return
+		}
+		if message.MessagedBy.Name == likemessage.Likeduser.Name {
+			log.Printf("Cannot Like own message")
+			return
+		}
+		likedusername, found := message.LikedBy[likemessage.Likeduser.Name]
+		if found {
+			log.Printf("already Liked the message")
+		}
+
+		//like
+		message.LikedBy[likemessage.Likeduser.Name] = likedusername
+
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("Liked message in the group %v", group.Groupname)
+			return
+		}
+
+	}
+}
+
+func (store *DiskStore) UnLikeMessage(unlikemessage *pb.UnLikeMessage) {
+	groupname := unlikemessage.Group.Groupname
+	group, found := store.GetGroup(groupname)
+	if found {
+		unlikemessagenumber := unlikemessage.Messageid
+		//validate the message
+		message, found := group.Messages[unlikemessagenumber]
+		if !found {
+			log.Printf("Message not found")
+			return
+		}
+		if message.MessagedBy.Name == unlikemessage.Unlikeduser.Name {
+			log.Printf("Cannot unLike own message")
+			return
+		}
+		unlikedusername, found := message.LikedBy[unlikemessage.Unlikeduser.Name]
+		if !found {
+			log.Printf("already unliked the message")
+		}
+
+		//unlike
+		delete(message.LikedBy, unlikedusername)
+
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("Unliked message in the group %v", group.Groupname)
+			return
+		}
+
+	}
 }
 func checkError(err error) {
 	if err != nil {

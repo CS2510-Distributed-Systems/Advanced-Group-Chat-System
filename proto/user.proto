@@ -11,5 +11,5 @@ message User {
 
 message Logout {
   User user = 1;
-  string groupname = 2;
+  string currgroup = 2;
 }

@@ -66,7 +66,7 @@ func (client *ChatServiceClient) UserLogout() bool {
 	req := &pb.LogoutRequest{
 		Logout: &pb.Logout{
 			User:      user,
-			Groupname: groupname,
+			Currgroup: groupname,
 		},
 	}
 	resp, err := client.authservice.Logout(context.Background(), req)
@@ -113,7 +113,7 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 			}
 
 			//process response
-			command := resp.Command
+			command := resp.Event
 			if command == "j" {
 				_ = client.clientstore.SetGroup(resp.GetGroup())
 			}
@@ -135,10 +135,8 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 			if err != nil {
 				log.Println("Client crashed inside the stream. Performing graceful shutdown")
 				return
-			} else {
-				log.Println("Logout Error.")
-			}
-
+			} 
+			
 			//preparing request
 			req, command := client.ProcessMessage(msg)
 			if command == "q" {
@@ -206,7 +204,7 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 			}
 			likemessage := &pb.GroupChatRequest_Like{
 				Like: &pb.LikeMessage{
-					User:      client.clientstore.GetUser(),
+					Likeduser: client.clientstore.GetUser(),
 					Messageid: uint32(messagenumber),
 					Group:     client.clientstore.GetGroup(),
 				},
@@ -225,9 +223,9 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 		}
 		unlikemessage := &pb.GroupChatRequest_Unlike{
 			Unlike: &pb.UnLikeMessage{
-				User:      client.clientstore.GetUser(),
-				Messageid: uint32(messagenumber),
-				Group:     client.clientstore.GetGroup(),
+				Unlikeduser: client.clientstore.GetUser(),
+				Messageid:   uint32(messagenumber),
+				Group:       client.clientstore.GetGroup(),
 			},
 		}
 		req := &pb.GroupChatRequest{
@@ -258,9 +256,9 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 		}
 		joinchat := &pb.GroupChatRequest_Joinchat{
 			Joinchat: &pb.JoinChat{
-				User:      client.clientstore.GetUser(),
-				Newgroup:  msg,
-				Currgroup: currgroup,
+				Joineduser: client.clientstore.GetUser(),
+				Newgroup:   msg,
+				Currgroup:  currgroup,
 			},
 		}
 		req := &pb.GroupChatRequest{

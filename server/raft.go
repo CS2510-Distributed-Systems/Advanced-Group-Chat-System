@@ -14,10 +14,8 @@ const DebugCM = 1
 
 // Command struct for the chat service application
 type Command struct {
-	Event          string
-	Triggeredby    string
-	Triggeredgroup string
-	Message        *pb.ChatMessage
+	Event   string
+	command *pb.Command
 }
 
 // Data reported by the raft to the commit channel. Each commit notifies that the consensus is achieved
@@ -512,7 +510,7 @@ func (cm *ConsensusModule) startLeader() {
 func (cm *ConsensusModule) forwardToLeader(command *pb.Command) {
 	if cm.state != Leader {
 		go func() {
-			log.Printf("Sorry, I'm not the leader rn.")
+			log.Printf("Sorry, I'm not the leader .")
 
 			args := &pb.ForwardLeaderRequest{
 				Command: command,
@@ -717,6 +715,7 @@ func (cm *ConsensusModule) restoreFromStorage() {
 
 // Saves all the CM's persistant state
 func (cm *ConsensusModule) persistToStorage() {
+	// log.Printf("Trying to persist data1..")
 	err := cm.storage.SetState(cm.currentTerm, cm.votedFor, cm.log)
 	if err == nil {
 		return

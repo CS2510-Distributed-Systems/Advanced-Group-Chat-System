@@ -5,14 +5,19 @@ option go_package = "./pb";
 package chat;
 
 import "chat.proto";
+import "user.proto";
 
 message Command {
-  string Event = 1;
-  uint32 UserId = 2;
-  string User = 3;
-  string Group = 4;
-  string NewGroup = 5;
-  ChatMessage ChatMessage = 6;
+  oneof action {
+    AppendChat append = 1;
+    LikeMessage like = 2;
+    UnLikeMessage unlike = 3;
+    PrintChat print = 4;
+    Logout logout = 5;
+    JoinChat joinchat = 6;
+    User login = 7;
+  }
+  string Event = 8;
 }
 
 message LogEntry {
