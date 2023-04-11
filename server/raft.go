@@ -656,7 +656,7 @@ func (cm *ConsensusModule) commitChanSender() {
 		savedLastApplied := cm.lastApplied
 		var entries []*pb.LogEntry
 		//if commit index is greater.. get the remaining log entries that need to be applied
-		if cm.commitIndex >= cm.lastApplied {
+		if cm.commitIndex > cm.lastApplied {
 			entries = cm.log[cm.lastApplied+1 : cm.commitIndex+1]
 			cm.lastApplied = cm.commitIndex
 		}

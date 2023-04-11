@@ -23,6 +23,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatServiceClient interface {
 	JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error)
+	ServerView(ctx context.Context, in *ServerViewRequest, opts ...grpc.CallOption) (*ServerViewResponse, error)
 }
 
 type chatServiceClient struct {
@@ -64,11 +65,21 @@ func (x *chatServiceJoinGroupChatClient) Recv() (*GroupChatResponse, error) {
 	return m, nil
 }
 
+func (c *chatServiceClient) ServerView(ctx context.Context, in *ServerViewRequest, opts ...grpc.CallOption) (*ServerViewResponse, error) {
+	out := new(ServerViewResponse)
+	err := c.cc.Invoke(ctx, "/chat.ChatService/ServerView", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChatServiceServer is the server API for ChatService service.
 // All implementations should embed UnimplementedChatServiceServer
 // for forward compatibility
 type ChatServiceServer interface {
 	JoinGroupChat(ChatService_JoinGroupChatServer) error
+	ServerView(context.Context, *ServerViewRequest) (*ServerViewResponse, error)
 }
 
 // UnimplementedChatServiceServer should be embedded to have forward compatible implementations.
@@ -77,6 +88,9 @@ type UnimplementedChatServiceServer struct {
 
 func (UnimplementedChatServiceServer) JoinGroupChat(ChatService_JoinGroupChatServer) error {
 	return status.Errorf(codes.Unimplemented, "method JoinGroupChat not implemented")
+}
+func (UnimplementedChatServiceServer) ServerView(context.Context, *ServerViewRequest) (*ServerViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ServerView not implemented")
 }
 
 // UnsafeChatServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -116,13 +130,36 @@ func (x *chatServiceJoinGroupChatServer) Recv() (*GroupChatRequest, error) {
 	return m, nil
 }
 
+func _ChatService_ServerView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ServerViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).ServerView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chat.ChatService/ServerView",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).ServerView(ctx, req.(*ServerViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ChatService_ServiceDesc is the grpc.ServiceDesc for ChatService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var ChatService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "chat.ChatService",
 	HandlerType: (*ChatServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ServerView",
+			Handler:    _ChatService_ServerView_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "JoinGroupChat",

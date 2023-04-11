@@ -27,13 +27,15 @@ type ChatServiceClient struct {
 	chatservice pb.ChatServiceClient
 	authservice pb.AuthServiceClient
 	clientstore ClientStore
+	serverId    int
 }
 
-func NewChatServiceClient(chatservice pb.ChatServiceClient, authservice pb.AuthServiceClient, store ClientStore) *ChatServiceClient {
+func NewChatServiceClient(chatservice pb.ChatServiceClient, authservice pb.AuthServiceClient, store ClientStore, serverId int) *ChatServiceClient {
 	return &ChatServiceClient{
 		chatservice: chatservice,
 		authservice: authservice,
 		clientstore: store,
+		serverId:    serverId,
 	}
 }
 
@@ -86,7 +88,19 @@ func (client *ChatServiceClient) UserLogout() bool {
 	return resp.Status
 }
 
-// experiment rpc
+func (client *ChatServiceClient) ServerView() {
+	req := &pb.ServerViewRequest{
+		Event: "v",
+	}
+	resp, err := client.chatservice.ServerView(context.Background(), req)
+	if err != nil {
+		log.Println("cannot Logout.Please Try again")
+	}
+	peerservers := resp.Peerservers
+	log.Printf("Client is currently connected to server%v whose peer servers are %v", client.serverId, peerservers)
+}
+
+// Biirectional rpc
 func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 
 	stream, err := client.chatservice.JoinGroupChat(context.Background())
@@ -96,11 +110,14 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 	}
 
 	done := make(chan bool)
+
+	//to join the group
 	req1, _ := client.ProcessMessage(mesg)
 	if err := stream.Send(req1); err != nil {
 		log.Println("Send request error")
 		return
 	}
+
 	//go routine for receive
 	go func() {
 		for {
@@ -154,18 +171,17 @@ func (client *ChatServiceClient) JoinGroupChat(mesg string) {
 			}
 			if err := stream.Send(req); err != nil {
 				log.Println("Send request error")
+				return
 			}
-
 		}
 	}()
 
 	<-done
-	log.Println("Streaming Ended from client side")
-
+	log.Println("Streaming Ended. Thank you")
+	return
 }
 
 func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatRequest, string) {
-	log.Println("Processing Message..")
 	msg = strings.Trim(msg, "\r\n")
 	args := strings.Split(msg, " ")
 	cmd := strings.TrimSpace(args[0])
@@ -192,7 +208,6 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 			req := &pb.GroupChatRequest{
 				Action: appendchat,
 			}
-			log.Printf("appended a message in the group")
 			return req, cmd
 
 		}
@@ -255,7 +270,6 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 
 	case "j":
 		//join the group
-		log.Println("Joining the group and starting the stream")
 		currgroup := "None"
 		if client.clientstore.GetGroup().GroupID != 0 {
 			currgroup = client.clientstore.GetGroup().Groupname
@@ -277,9 +291,13 @@ func (client *ChatServiceClient) ProcessMessage(msg string) (*pb.GroupChatReques
 		client.UserLogout()
 		req := &pb.GroupChatRequest{}
 		return req, cmd
-
+	case "v":
+		client.ServerView()
+		req := &pb.GroupChatRequest{}
+		return req, cmd
 	default:
 		log.Printf("Cannot read the message, please enter again")
+		return &pb.GroupChatRequest{}, cmd
 
 	}
 	return &pb.GroupChatRequest{}, cmd

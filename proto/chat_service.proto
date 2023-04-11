@@ -16,6 +16,7 @@ message GroupChatRequest {
     PrintChat print = 4;
     Logout logout = 5;
     JoinChat joinchat = 6;
+    ServerViewRequest serverview = 7;
   }
 }
 
@@ -23,10 +24,14 @@ message GroupChatResponse {
   Group group = 1;
   string event = 2;
 }
+message ServerViewRequest { string event = 1; }
+
+message ServerViewResponse { repeated int64 peerservers = 1; }
 
 service ChatService {
   rpc JoinGroupChat(stream GroupChatRequest)
       returns (stream GroupChatResponse) {};
+  rpc ServerView(ServerViewRequest) returns (ServerViewResponse) {};
 }
 
 service AuthService {

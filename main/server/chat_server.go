@@ -10,11 +10,11 @@ import (
 	"sync"
 
 	"google.golang.org/grpc"
-	//badger storage
+	//badger storag
 )
 
 func main() {
-	// Process commandline arguments
+	// Process commandline argument
 	// address := flag.String("Address", "localhost", "server address")
 	// portArg := flag.Int("port", 12000, "the server port")
 	Id := flag.Int("id", 1, "server ID")

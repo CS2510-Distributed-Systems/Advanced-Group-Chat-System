@@ -4,11 +4,11 @@ import (
 	"bufio"
 	client "chat-system/chat_client"
 	"chat-system/pb"
-	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	// "time"
 	"strings"
@@ -25,6 +25,7 @@ func main() {
 		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			log.Println("Error while reading command. Please try again.")
+			continue
 		}
 		msg = strings.Trim(msg, "\r\n")
 		argument := strings.Split(msg, " ")
@@ -33,6 +34,8 @@ func main() {
 		if len(argument) > 1 {
 			address = argument[1]
 		}
+		s := make(chan int, 1)
+		
 		switch command {
 		case "c":
 			if strings.TrimSpace(address) == "" {
@@ -43,12 +46,14 @@ func main() {
 				port := server_address[1]
 				connectClient(address, port)
 				continue
+
 			}
 		case "q":
 			log.Println("closed the program")
 			return
 		default:
 			log.Println("Please provide correct command to proceed.")
+			continue
 		}
 
 	}
@@ -56,7 +61,7 @@ func main() {
 }
 
 // client
-func connectClient(server_address string, port string) error {
+func connectClient(server_address string, port string) {
 	log.Printf("Dialing to server %s:%v", server_address, port)
 
 	// Connect to RPC server
@@ -64,14 +69,15 @@ func connectClient(server_address string, port string) error {
 	conn, err := grpc.Dial(server_address+":"+port, transportOption)
 	if err != nil {
 		log.Fatal("cannot dial the server", err)
-		return errors.New("Please provide correct address")
+		return
 	}
+	serverId := int(server_address[len(server_address)-1])
 
 	log.Printf("Dialing to server %s:%v", server_address, port)
 	log.Printf("Target : %v :%v ", conn.GetState(), conn.Target())
 	clientstore := client.NewInMemoryClientStore()
-	chatclient := client.NewChatServiceClient(pb.NewChatServiceClient(conn), pb.NewAuthServiceClient(conn), clientstore)
-
+	chatclient := client.NewChatServiceClient(pb.NewChatServiceClient(conn), pb.NewAuthServiceClient(conn), clientstore, serverId)
+	time.Sleep(20 * time.Millisecond)
 	//Handling client crashing
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -80,6 +86,18 @@ func connectClient(server_address string, port string) error {
 		chatclient.UserLogout()
 		os.Exit(1)
 	}()
+	go func() {
+		for {
+			state := conn.GetState().String()
+			log.Printf("state %v:", state)
+			if state != "READY" {
+				log.Printf("Iside the state shutdown")
+				break
+
+			}
+
+		}
+	}()
 
 	for {
 		//read input
@@ -87,6 +105,7 @@ func connectClient(server_address string, port string) error {
 		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			log.Println("Client crashed. Performing graceful shutdown")
+			return
 		}
 
 		//parsing input
@@ -104,7 +123,7 @@ func connectClient(server_address string, port string) error {
 				err := client.UserLogin(username, chatclient)
 				if err != nil {
 					fmt.Println(err)
-					return nil
+					return
 				}
 			}
 
@@ -118,7 +137,7 @@ func connectClient(server_address string, port string) error {
 					log.Println("Please provide a valid group name")
 				}
 				chatclient.JoinGroupChat(msg)
-				return nil
+				return
 
 			}
 		case "a", "l", "r":
@@ -128,11 +147,12 @@ func connectClient(server_address string, port string) error {
 			if chatclient.UserLogout() {
 				log.Println("Connection closed.")
 				conn.Close()
-				return nil
+				return
 			} else {
 				log.Println("Logout Error.")
 			}
-
+		case "v":
+			chatclient.ServerView()
 		default:
 			log.Printf("incorrect command, please enter again\n")
 		}

@@ -75,12 +75,20 @@ func (s *ChatServiceServer) Logout(ctx context.Context, req *pb.LogoutRequest) (
 		resp = &pb.LogoutResponse{
 			Status: true,
 		}
-		s.raft.broadcast <- groupname
 	}
 
 	return resp, nil
 }
 
+func (s *ChatServiceServer) ServerView(ctx context.Context, req *pb.ServerViewRequest) (*pb.ServerViewResponse, error) {
+	log.Println("Received Server View Request")
+	//ask raft about the connected peers
+	activepeers := s.raft.GetActivePeers()
+	resp := &pb.ServerViewResponse{
+		Peerservers: activepeers,
+	}
+	return resp, nil
+}
 // Group Join Bidirectional RPC
 func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatServer) error {
 	log.Println("Received Join Group Request")
@@ -108,27 +116,36 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 
 		//adding the new client
 		//change1
+		time.Sleep(200 * time.Millisecond)
 		if event == "j" {
 			user := req.GetJoinchat().Joineduser
 
 			//store the stream details
 			newclient := [2]string{groupname, user.Name}
 			s.connstore.AddConn(stream, newclient)
+			group, _ := s.raft.cm.storage.GetGroup(groupname)
+			resp := &pb.GroupChatResponse{
+				Group: group,
+				Event: event,
+			}
+
+			if err := stream.Send(resp); err != nil {
+				log.Printf("Error in send stream: %v", err)
+			}
+		}
+		//as we will not braodcast for p, send a response seperately.
+		if event == "p" {
+			group, _ := s.raft.cm.storage.GetGroup(groupname)
+			resp := &pb.GroupChatResponse{
+				Group: group,
+				Event: event,
+			}
+
+			if err := stream.Send(resp); err != nil {
+				log.Printf("Error in send stream: %v", err)
+			}
 		}
 
-		//prepare a response
-		time.Sleep(200 * time.Millisecond)
-		group, _ := s.raft.cm.storage.GetGroup(groupname)
-		resp := &pb.GroupChatResponse{
-			Group: group,
-			Event: event,
-		}
-
-		//braodcast the change
-		s.raft.broadcast <- groupname
-		if err := stream.Send(resp); err != nil {
-			log.Printf("Error in send stream: %v", err)
-		}
 	}
 
 }
@@ -227,8 +244,12 @@ func (s *ChatServiceServer) ProcessRequest(req *pb.GroupChatRequest) (string, st
 		action := &pb.GroupChatRequest_Print{
 			Print: req.GetPrint(),
 		}
-
 		return action.Print.Groupname, event
+	
+		
+		
+
+		
 	}
 
 	return "", ""

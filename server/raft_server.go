@@ -99,8 +99,6 @@ func (s *Server) GetPeerAddr(peerId int64) string {
 }
 
 func (s *Server) ConnectToPeer(peerId int64, addr string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	transportOption := grpc.WithTransportCredentials(insecure.NewCredentials())
 	clientconn, err := grpc.Dial(addr, transportOption)
 	if err != nil {
@@ -190,3 +188,24 @@ func (s *Server) persistData(commitentry CommitEntry) {
 
 }
 
+func (s *Server) GetActivePeers() []int64 {
+	var activepeers []int64
+	for j := 1; j <= 5; j++ {
+		if int(s.serverId) != j {
+			k := int64(j)
+			if s.checkPeerConnection(k) {
+				activepeers = append(activepeers, k)
+			}
+		}
+	}
+	return activepeers
+}
+
+func (s *Server) checkPeerConnection(peerId int64) bool {
+	state := s.peerClients[peerId].GetState().String()
+	log.Printf("State of peer %v is %v", peerId, state)
+	if state == "IDLE" || state == "READY" {
+		return true
+	}
+	return false
+}
