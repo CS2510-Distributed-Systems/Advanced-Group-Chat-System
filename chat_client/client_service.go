@@ -378,10 +378,8 @@ func (client *ChatServiceClient) ConnectionHealthCheck(conn *grpc.ClientConn) {
 		for {
 			state := conn.GetState().String()
 			if state != "READY" {
-				log.Printf("Inside the state shutdown")
+				log.Printf("Server Disconnected")
 				os.Exit(1)
-				break
-
 			}
 
 		}

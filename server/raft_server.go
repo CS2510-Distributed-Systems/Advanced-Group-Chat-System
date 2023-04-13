@@ -166,6 +166,7 @@ func (s *Server) persistData(commitentry CommitEntry) {
 		if s.cm.storage.RemoveUserInGroup(joinchat.Joineduser.Id, joinchat.Currgroup) {
 			s.cm.storage.JoinGroup(joinchat.Newgroup, joinchat.Joineduser)
 		}
+		s.broadcast <- joinchat.Currgroup
 		s.broadcast <- joinchat.Newgroup
 	case "a":
 		append := command.GetAppend()

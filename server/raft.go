@@ -162,10 +162,10 @@ func (cm *ConsensusModule) Submit(command *pb.Command) bool {
 	log.Printf("Submit received by %v: %v", cm.state, command)
 	if cm.state == Leader {
 		cm.log = append(cm.log, &pb.LogEntry{Command: command, Term: cm.currentTerm})
+		cm.mu.Unlock()
 		cm.persistToStorage()
 		// log.Printf("... log=%v", cm.log)
 		cm.triggerAEChan <- 1
-		cm.mu.Unlock()
 
 		return true
 	} else {

@@ -36,13 +36,14 @@ func main() {
 
 		switch command {
 		case "c":
-			if strings.TrimSpace(address) == "" {
-				log.Println("Please specify address to connect")
+			address := strings.TrimSpace(address)
+			if !strings.Contains(address, ":") {
+				log.Println("Incorrect server address.")
 			} else {
 				server_address := strings.Split(address, ":")
-				address := server_address[0]
+				ip := server_address[0]
 				port := server_address[1]
-				ConnectClient(address, port)
+				ConnectClient(ip, port)
 				continue
 
 			}
@@ -56,31 +57,40 @@ func main() {
 }
 
 // client
-func ConnectClient(server_address string, port string) {
-	log.Printf("Dialing to server %s:%v", server_address, port)
+func ConnectClient(ip string, port string) {
+	log.Printf("Dialing to server %s:%v", ip, port)
 
 	// Connect to RPC server
 	transportOption := grpc.WithTransportCredentials(insecure.NewCredentials())
-	conn, err := grpc.Dial(server_address+":"+port, transportOption)
+	conn, err := grpc.Dial(ip+":"+port, transportOption)
 	if err != nil {
 		log.Fatal("cannot dial the server", err)
 		return
 	}
-	serverId := int(server_address[len(server_address)-1])
+	serverId := int(ip[len(ip)-1])
 	clientstore := client.NewInMemoryClientStore()
 	chatclient := client.NewChatServiceClient(pb.NewChatServiceClient(conn), pb.NewAuthServiceClient(conn), clientstore, serverId)
 	time.Sleep(20 * time.Millisecond)
-
-	//Handling client crashing amd server crashing
-	go chatclient.ConnectionHealthCheck(conn)
-
+	Event := "Login: "
 	for {
+		state := conn.GetState().String()
+		if state != "READY" {
+			log.Printf("Cannot connect to the server.")
+			return
+
+		}
+
+		//Handling client crashing amd server crashing
+		go chatclient.ConnectionHealthCheck(conn)
+
 		//read input
-		log.Printf("Enter the message:")
+		log.Printf("%v", Event)
 		msg, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
 			log.Println("Client crashed. Performing graceful shutdown")
-			return
+			chatclient.UserLogout()
+			
+			os.Exit(1)
 		}
 
 		//parsing input
@@ -100,6 +110,7 @@ func ConnectClient(server_address string, port string) {
 					fmt.Println(err)
 					return
 				}
+				Event = "Enter the Group :"
 			}
 
 		case "j":
