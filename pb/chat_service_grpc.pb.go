@@ -22,8 +22,8 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatServiceClient interface {
-	JoinGroup(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error)
-	GroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_GroupChatClient, error)
+	JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error)
+	ServerView(ctx context.Context, in *ServerViewRequest, opts ...grpc.CallOption) (*ServerViewResponse, error)
 }
 
 type chatServiceClient struct {
@@ -34,39 +34,30 @@ func NewChatServiceClient(cc grpc.ClientConnInterface) ChatServiceClient {
 	return &chatServiceClient{cc}
 }
 
-func (c *chatServiceClient) JoinGroup(ctx context.Context, in *JoinRequest, opts ...grpc.CallOption) (*JoinResponse, error) {
-	out := new(JoinResponse)
-	err := c.cc.Invoke(ctx, "/chat.ChatService/JoinGroup", in, out, opts...)
+func (c *chatServiceClient) JoinGroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_JoinGroupChatClient, error) {
+	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], "/chat.ChatService/JoinGroupChat", opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
-}
-
-func (c *chatServiceClient) GroupChat(ctx context.Context, opts ...grpc.CallOption) (ChatService_GroupChatClient, error) {
-	stream, err := c.cc.NewStream(ctx, &ChatService_ServiceDesc.Streams[0], "/chat.ChatService/GroupChat", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &chatServiceGroupChatClient{stream}
+	x := &chatServiceJoinGroupChatClient{stream}
 	return x, nil
 }
 
-type ChatService_GroupChatClient interface {
+type ChatService_JoinGroupChatClient interface {
 	Send(*GroupChatRequest) error
 	Recv() (*GroupChatResponse, error)
 	grpc.ClientStream
 }
 
-type chatServiceGroupChatClient struct {
+type chatServiceJoinGroupChatClient struct {
 	grpc.ClientStream
 }
 
-func (x *chatServiceGroupChatClient) Send(m *GroupChatRequest) error {
+func (x *chatServiceJoinGroupChatClient) Send(m *GroupChatRequest) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *chatServiceGroupChatClient) Recv() (*GroupChatResponse, error) {
+func (x *chatServiceJoinGroupChatClient) Recv() (*GroupChatResponse, error) {
 	m := new(GroupChatResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -74,23 +65,32 @@ func (x *chatServiceGroupChatClient) Recv() (*GroupChatResponse, error) {
 	return m, nil
 }
 
+func (c *chatServiceClient) ServerView(ctx context.Context, in *ServerViewRequest, opts ...grpc.CallOption) (*ServerViewResponse, error) {
+	out := new(ServerViewResponse)
+	err := c.cc.Invoke(ctx, "/chat.ChatService/ServerView", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ChatServiceServer is the server API for ChatService service.
 // All implementations should embed UnimplementedChatServiceServer
 // for forward compatibility
 type ChatServiceServer interface {
-	JoinGroup(context.Context, *JoinRequest) (*JoinResponse, error)
-	GroupChat(ChatService_GroupChatServer) error
+	JoinGroupChat(ChatService_JoinGroupChatServer) error
+	ServerView(context.Context, *ServerViewRequest) (*ServerViewResponse, error)
 }
 
 // UnimplementedChatServiceServer should be embedded to have forward compatible implementations.
 type UnimplementedChatServiceServer struct {
 }
 
-func (UnimplementedChatServiceServer) JoinGroup(context.Context, *JoinRequest) (*JoinResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method JoinGroup not implemented")
+func (UnimplementedChatServiceServer) JoinGroupChat(ChatService_JoinGroupChatServer) error {
+	return status.Errorf(codes.Unimplemented, "method JoinGroupChat not implemented")
 }
-func (UnimplementedChatServiceServer) GroupChat(ChatService_GroupChatServer) error {
-	return status.Errorf(codes.Unimplemented, "method GroupChat not implemented")
+func (UnimplementedChatServiceServer) ServerView(context.Context, *ServerViewRequest) (*ServerViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ServerView not implemented")
 }
 
 // UnsafeChatServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -104,48 +104,48 @@ func RegisterChatServiceServer(s grpc.ServiceRegistrar, srv ChatServiceServer) {
 	s.RegisterService(&ChatService_ServiceDesc, srv)
 }
 
-func _ChatService_JoinGroup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(JoinRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ChatServiceServer).JoinGroup(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/chat.ChatService/JoinGroup",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ChatServiceServer).JoinGroup(ctx, req.(*JoinRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+func _ChatService_JoinGroupChat_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ChatServiceServer).JoinGroupChat(&chatServiceJoinGroupChatServer{stream})
 }
 
-func _ChatService_GroupChat_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ChatServiceServer).GroupChat(&chatServiceGroupChatServer{stream})
-}
-
-type ChatService_GroupChatServer interface {
+type ChatService_JoinGroupChatServer interface {
 	Send(*GroupChatResponse) error
 	Recv() (*GroupChatRequest, error)
 	grpc.ServerStream
 }
 
-type chatServiceGroupChatServer struct {
+type chatServiceJoinGroupChatServer struct {
 	grpc.ServerStream
 }
 
-func (x *chatServiceGroupChatServer) Send(m *GroupChatResponse) error {
+func (x *chatServiceJoinGroupChatServer) Send(m *GroupChatResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *chatServiceGroupChatServer) Recv() (*GroupChatRequest, error) {
+func (x *chatServiceJoinGroupChatServer) Recv() (*GroupChatRequest, error) {
 	m := new(GroupChatRequest)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+func _ChatService_ServerView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ServerViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServiceServer).ServerView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chat.ChatService/ServerView",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServiceServer).ServerView(ctx, req.(*ServerViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 // ChatService_ServiceDesc is the grpc.ServiceDesc for ChatService service.
@@ -156,14 +156,14 @@ var ChatService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*ChatServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "JoinGroup",
-			Handler:    _ChatService_JoinGroup_Handler,
+			MethodName: "ServerView",
+			Handler:    _ChatService_ServerView_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "GroupChat",
-			Handler:       _ChatService_GroupChat_Handler,
+			StreamName:    "JoinGroupChat",
+			Handler:       _ChatService_JoinGroupChat_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
@@ -285,6 +285,162 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Logout",
 			Handler:    _AuthService_Logout_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "chat_service.proto",
+}
+
+// RaftServiceClient is the client API for RaftService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type RaftServiceClient interface {
+	AppendEntries(ctx context.Context, in *AppendEntriesRequest, opts ...grpc.CallOption) (*AppendEntriesResponse, error)
+	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
+	ForwardLeader(ctx context.Context, in *ForwardLeaderRequest, opts ...grpc.CallOption) (*ForwardLeaderResponse, error)
+}
+
+type raftServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewRaftServiceClient(cc grpc.ClientConnInterface) RaftServiceClient {
+	return &raftServiceClient{cc}
+}
+
+func (c *raftServiceClient) AppendEntries(ctx context.Context, in *AppendEntriesRequest, opts ...grpc.CallOption) (*AppendEntriesResponse, error) {
+	out := new(AppendEntriesResponse)
+	err := c.cc.Invoke(ctx, "/chat.RaftService/AppendEntries", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftServiceClient) RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error) {
+	out := new(RequestVoteResponse)
+	err := c.cc.Invoke(ctx, "/chat.RaftService/RequestVote", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftServiceClient) ForwardLeader(ctx context.Context, in *ForwardLeaderRequest, opts ...grpc.CallOption) (*ForwardLeaderResponse, error) {
+	out := new(ForwardLeaderResponse)
+	err := c.cc.Invoke(ctx, "/chat.RaftService/ForwardLeader", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RaftServiceServer is the server API for RaftService service.
+// All implementations should embed UnimplementedRaftServiceServer
+// for forward compatibility
+type RaftServiceServer interface {
+	AppendEntries(context.Context, *AppendEntriesRequest) (*AppendEntriesResponse, error)
+	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
+	ForwardLeader(context.Context, *ForwardLeaderRequest) (*ForwardLeaderResponse, error)
+}
+
+// UnimplementedRaftServiceServer should be embedded to have forward compatible implementations.
+type UnimplementedRaftServiceServer struct {
+}
+
+func (UnimplementedRaftServiceServer) AppendEntries(context.Context, *AppendEntriesRequest) (*AppendEntriesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AppendEntries not implemented")
+}
+func (UnimplementedRaftServiceServer) RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestVote not implemented")
+}
+func (UnimplementedRaftServiceServer) ForwardLeader(context.Context, *ForwardLeaderRequest) (*ForwardLeaderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ForwardLeader not implemented")
+}
+
+// UnsafeRaftServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to RaftServiceServer will
+// result in compilation errors.
+type UnsafeRaftServiceServer interface {
+	mustEmbedUnimplementedRaftServiceServer()
+}
+
+func RegisterRaftServiceServer(s grpc.ServiceRegistrar, srv RaftServiceServer) {
+	s.RegisterService(&RaftService_ServiceDesc, srv)
+}
+
+func _RaftService_AppendEntries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppendEntriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServiceServer).AppendEntries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chat.RaftService/AppendEntries",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServiceServer).AppendEntries(ctx, req.(*AppendEntriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftService_RequestVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestVoteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServiceServer).RequestVote(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chat.RaftService/RequestVote",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServiceServer).RequestVote(ctx, req.(*RequestVoteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftService_ForwardLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForwardLeaderRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServiceServer).ForwardLeader(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chat.RaftService/ForwardLeader",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServiceServer).ForwardLeader(ctx, req.(*ForwardLeaderRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// RaftService_ServiceDesc is the grpc.ServiceDesc for RaftService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var RaftService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "chat.RaftService",
+	HandlerType: (*RaftServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "AppendEntries",
+			Handler:    _RaftService_AppendEntries_Handler,
+		},
+		{
+			MethodName: "RequestVote",
+			Handler:    _RaftService_RequestVote_Handler,
+		},
+		{
+			MethodName: "ForwardLeader",
+			Handler:    _RaftService_ForwardLeader_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
