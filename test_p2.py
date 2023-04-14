@@ -58,8 +58,7 @@ def server_name(server_id):
 
 # Do all initialization
 def init_all(args):
-    init_network()
-    
+    init_network()    
     init_containers()
     time.sleep(10)
     init_netem()
@@ -77,7 +76,6 @@ def init_containers():
         print(cmd_str)
         #subprocess.Popen(cmd_str, shell=True)
         subprocess.Popen(cmd_str, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(10)
     return
 
 # Initialize netem classes for each server

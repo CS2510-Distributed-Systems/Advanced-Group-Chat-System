@@ -70,7 +70,7 @@ func ConnectClient(ip string, port string) {
 	serverId := int(ip[len(ip)-1])
 	clientstore := client.NewInMemoryClientStore()
 	chatclient := client.NewChatServiceClient(pb.NewChatServiceClient(conn), pb.NewAuthServiceClient(conn), clientstore, serverId)
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(5 * time.Second)
 	Event := "Login: "
 	for {
 		state := conn.GetState().String()
@@ -89,7 +89,7 @@ func ConnectClient(ip string, port string) {
 		if err != nil {
 			log.Println("Client crashed. Performing graceful shutdown")
 			chatclient.UserLogout()
-			
+
 			os.Exit(1)
 		}
 
