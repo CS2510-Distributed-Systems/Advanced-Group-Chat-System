@@ -92,10 +92,11 @@ func (s *Server) GetListenAddr() net.Addr {
 }
 
 func (s *Server) GetPeerAddr(peerId int64) string {
-	BASE_IP := "0.0.0.0"
-	port := ":1200" + strconv.Itoa(int(peerId))
-	addr := BASE_IP + port
-	return addr
+	IP_BASE := "172.30.100.10"
+	port := ":12000"
+	IP := IP_BASE + strconv.Itoa(int(peerId)) + port
+
+	return IP
 }
 
 func (s *Server) ConnectToPeer(peerId int64, addr string) error {

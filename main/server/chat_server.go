@@ -23,10 +23,10 @@ func main() {
 	//construct the IP
 	serverId := *Id
 	serverId_string := strconv.Itoa(serverId)
-	IP_BASE := "0.0.0.0"
-	port := ":1200" + serverId_string
+	IP_BASE := "172.30.100.10"
+	port := ":12000"
 	// port = ":12000"
-	IP := IP_BASE + port
+	IP := IP_BASE + serverId_string + port
 
 	var wg sync.WaitGroup
 
