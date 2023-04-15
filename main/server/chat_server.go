@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"google.golang.org/grpc"
-	//badger storag
+	//badger storage
 )
 
 func main() {

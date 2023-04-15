@@ -66,3 +66,17 @@ message RequestVoteResponse {
   int64 Term = 1;
   bool VoteGranted = 2;
 }
+
+message MergeRequest { int64 Leaderid = 1; }
+
+message MergeResponse {
+  bool isTempLog = 1;
+  repeated LogEntry Entries = 2;
+}
+
+message LocalAERequest {
+  repeated LogEntry Entries = 1;
+  int64 commitindex = 2;
+  int64 nextindex = 3;
+}
+message LocalAEResponse { bool success = 1; }

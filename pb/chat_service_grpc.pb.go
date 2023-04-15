@@ -298,6 +298,8 @@ type RaftServiceClient interface {
 	AppendEntries(ctx context.Context, in *AppendEntriesRequest, opts ...grpc.CallOption) (*AppendEntriesResponse, error)
 	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
 	ForwardLeader(ctx context.Context, in *ForwardLeaderRequest, opts ...grpc.CallOption) (*ForwardLeaderResponse, error)
+	GetTempLogs(ctx context.Context, in *MergeRequest, opts ...grpc.CallOption) (*MergeResponse, error)
+	LocalAEs(ctx context.Context, in *LocalAERequest, opts ...grpc.CallOption) (*LocalAEResponse, error)
 }
 
 type raftServiceClient struct {
@@ -335,6 +337,24 @@ func (c *raftServiceClient) ForwardLeader(ctx context.Context, in *ForwardLeader
 	return out, nil
 }
 
+func (c *raftServiceClient) GetTempLogs(ctx context.Context, in *MergeRequest, opts ...grpc.CallOption) (*MergeResponse, error) {
+	out := new(MergeResponse)
+	err := c.cc.Invoke(ctx, "/chat.RaftService/GetTempLogs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftServiceClient) LocalAEs(ctx context.Context, in *LocalAERequest, opts ...grpc.CallOption) (*LocalAEResponse, error) {
+	out := new(LocalAEResponse)
+	err := c.cc.Invoke(ctx, "/chat.RaftService/LocalAEs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftServiceServer is the server API for RaftService service.
 // All implementations should embed UnimplementedRaftServiceServer
 // for forward compatibility
@@ -342,6 +362,8 @@ type RaftServiceServer interface {
 	AppendEntries(context.Context, *AppendEntriesRequest) (*AppendEntriesResponse, error)
 	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
 	ForwardLeader(context.Context, *ForwardLeaderRequest) (*ForwardLeaderResponse, error)
+	GetTempLogs(context.Context, *MergeRequest) (*MergeResponse, error)
+	LocalAEs(context.Context, *LocalAERequest) (*LocalAEResponse, error)
 }
 
 // UnimplementedRaftServiceServer should be embedded to have forward compatible implementations.
@@ -356,6 +378,12 @@ func (UnimplementedRaftServiceServer) RequestVote(context.Context, *RequestVoteR
 }
 func (UnimplementedRaftServiceServer) ForwardLeader(context.Context, *ForwardLeaderRequest) (*ForwardLeaderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ForwardLeader not implemented")
+}
+func (UnimplementedRaftServiceServer) GetTempLogs(context.Context, *MergeRequest) (*MergeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTempLogs not implemented")
+}
+func (UnimplementedRaftServiceServer) LocalAEs(context.Context, *LocalAERequest) (*LocalAEResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LocalAEs not implemented")
 }
 
 // UnsafeRaftServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -423,6 +451,42 @@ func _RaftService_ForwardLeader_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftService_GetTempLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MergeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServiceServer).GetTempLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chat.RaftService/GetTempLogs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServiceServer).GetTempLogs(ctx, req.(*MergeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftService_LocalAEs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LocalAERequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServiceServer).LocalAEs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/chat.RaftService/LocalAEs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServiceServer).LocalAEs(ctx, req.(*LocalAERequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftService_ServiceDesc is the grpc.ServiceDesc for RaftService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -441,6 +505,14 @@ var RaftService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForwardLeader",
 			Handler:    _RaftService_ForwardLeader_Handler,
+		},
+		{
+			MethodName: "GetTempLogs",
+			Handler:    _RaftService_GetTempLogs_Handler,
+		},
+		{
+			MethodName: "LocalAEs",
+			Handler:    _RaftService_LocalAEs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

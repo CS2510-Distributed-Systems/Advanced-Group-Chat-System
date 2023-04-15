@@ -1,4 +1,4 @@
-//raft server for the raft consensus ,,odul. Exposes the Raft to the network and
+//raft server for the raft consensus moodule. Exposes the Raft to the network and
 //enables RPCs between Raft Peers
 
 package chat_server
@@ -159,6 +159,15 @@ func (s *Server) ForwardLeader(ctx context.Context, req *pb.ForwardLeaderRequest
 // RPC to send Entries to the Followers by the leader server
 func (s *Server) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
 	return s.cm.AppendEntriesHelper(req)
+}
+
+// rpc to send the templogs to leader if any
+func (s *Server) GetTempLogs(ctx context.Context, req *pb.MergeRequest) (*pb.MergeResponse, error) {
+	return s.cm.GetTempLogsHelper(req)
+}
+
+func (s *Server) LocalAEs(ctx context.Context, req *pb.LocalAERequest) (*pb.LocalAEResponse, error) {
+	return s.cm.SendLocalAEsHelper(req)
 }
 
 func (s *Server) persistData(commitentry CommitEntry) {

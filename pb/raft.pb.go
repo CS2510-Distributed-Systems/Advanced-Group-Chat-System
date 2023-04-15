@@ -684,6 +684,218 @@ func (x *RequestVoteResponse) GetVoteGranted() bool {
 	return false
 }
 
+type MergeRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Leaderid int64 `protobuf:"varint,1,opt,name=Leaderid,proto3" json:"Leaderid,omitempty"`
+}
+
+func (x *MergeRequest) Reset() {
+	*x = MergeRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_raft_proto_msgTypes[9]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *MergeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeRequest) ProtoMessage() {}
+
+func (x *MergeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_raft_proto_msgTypes[9]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeRequest.ProtoReflect.Descriptor instead.
+func (*MergeRequest) Descriptor() ([]byte, []int) {
+	return file_raft_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *MergeRequest) GetLeaderid() int64 {
+	if x != nil {
+		return x.Leaderid
+	}
+	return 0
+}
+
+type MergeResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	IsTempLog bool        `protobuf:"varint,1,opt,name=isTempLog,proto3" json:"isTempLog,omitempty"`
+	Entries   []*LogEntry `protobuf:"bytes,2,rep,name=Entries,proto3" json:"Entries,omitempty"`
+}
+
+func (x *MergeResponse) Reset() {
+	*x = MergeResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_raft_proto_msgTypes[10]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *MergeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeResponse) ProtoMessage() {}
+
+func (x *MergeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_raft_proto_msgTypes[10]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeResponse.ProtoReflect.Descriptor instead.
+func (*MergeResponse) Descriptor() ([]byte, []int) {
+	return file_raft_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MergeResponse) GetIsTempLog() bool {
+	if x != nil {
+		return x.IsTempLog
+	}
+	return false
+}
+
+func (x *MergeResponse) GetEntries() []*LogEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+type LocalAERequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Entries     []*LogEntry `protobuf:"bytes,1,rep,name=Entries,proto3" json:"Entries,omitempty"`
+	Commitindex int64       `protobuf:"varint,2,opt,name=commitindex,proto3" json:"commitindex,omitempty"`
+	Nextindex   int64       `protobuf:"varint,3,opt,name=nextindex,proto3" json:"nextindex,omitempty"`
+}
+
+func (x *LocalAERequest) Reset() {
+	*x = LocalAERequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_raft_proto_msgTypes[11]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *LocalAERequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LocalAERequest) ProtoMessage() {}
+
+func (x *LocalAERequest) ProtoReflect() protoreflect.Message {
+	mi := &file_raft_proto_msgTypes[11]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LocalAERequest.ProtoReflect.Descriptor instead.
+func (*LocalAERequest) Descriptor() ([]byte, []int) {
+	return file_raft_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *LocalAERequest) GetEntries() []*LogEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *LocalAERequest) GetCommitindex() int64 {
+	if x != nil {
+		return x.Commitindex
+	}
+	return 0
+}
+
+func (x *LocalAERequest) GetNextindex() int64 {
+	if x != nil {
+		return x.Nextindex
+	}
+	return 0
+}
+
+type LocalAEResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+}
+
+func (x *LocalAEResponse) Reset() {
+	*x = LocalAEResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_raft_proto_msgTypes[12]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *LocalAEResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LocalAEResponse) ProtoMessage() {}
+
+func (x *LocalAEResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_raft_proto_msgTypes[12]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LocalAEResponse.ProtoReflect.Descriptor instead.
+func (*LocalAEResponse) Descriptor() ([]byte, []int) {
+	return file_raft_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *LocalAEResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
 var File_raft_proto protoreflect.FileDescriptor
 
 var file_raft_proto_rawDesc = []byte{
@@ -767,8 +979,27 @@ var file_raft_proto_rawDesc = []byte{
 	0x65, 0x12, 0x12, 0x0a, 0x04, 0x54, 0x65, 0x72, 0x6d, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52,
 	0x04, 0x54, 0x65, 0x72, 0x6d, 0x12, 0x20, 0x0a, 0x0b, 0x56, 0x6f, 0x74, 0x65, 0x47, 0x72, 0x61,
 	0x6e, 0x74, 0x65, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x08, 0x52, 0x0b, 0x56, 0x6f, 0x74, 0x65,
-	0x47, 0x72, 0x61, 0x6e, 0x74, 0x65, 0x64, 0x42, 0x06, 0x5a, 0x04, 0x2e, 0x2f, 0x70, 0x62, 0x62,
-	0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x47, 0x72, 0x61, 0x6e, 0x74, 0x65, 0x64, 0x22, 0x2a, 0x0a, 0x0c, 0x4d, 0x65, 0x72, 0x67, 0x65,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1a, 0x0a, 0x08, 0x4c, 0x65, 0x61, 0x64, 0x65,
+	0x72, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x4c, 0x65, 0x61, 0x64, 0x65,
+	0x72, 0x69, 0x64, 0x22, 0x57, 0x0a, 0x0d, 0x4d, 0x65, 0x72, 0x67, 0x65, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x12, 0x1c, 0x0a, 0x09, 0x69, 0x73, 0x54, 0x65, 0x6d, 0x70, 0x4c, 0x6f,
+	0x67, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x09, 0x69, 0x73, 0x54, 0x65, 0x6d, 0x70, 0x4c,
+	0x6f, 0x67, 0x12, 0x28, 0x0a, 0x07, 0x45, 0x6e, 0x74, 0x72, 0x69, 0x65, 0x73, 0x18, 0x02, 0x20,
+	0x03, 0x28, 0x0b, 0x32, 0x0e, 0x2e, 0x63, 0x68, 0x61, 0x74, 0x2e, 0x4c, 0x6f, 0x67, 0x45, 0x6e,
+	0x74, 0x72, 0x79, 0x52, 0x07, 0x45, 0x6e, 0x74, 0x72, 0x69, 0x65, 0x73, 0x22, 0x7a, 0x0a, 0x0e,
+	0x4c, 0x6f, 0x63, 0x61, 0x6c, 0x41, 0x45, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x28,
+	0x0a, 0x07, 0x45, 0x6e, 0x74, 0x72, 0x69, 0x65, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32,
+	0x0e, 0x2e, 0x63, 0x68, 0x61, 0x74, 0x2e, 0x4c, 0x6f, 0x67, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52,
+	0x07, 0x45, 0x6e, 0x74, 0x72, 0x69, 0x65, 0x73, 0x12, 0x20, 0x0a, 0x0b, 0x63, 0x6f, 0x6d, 0x6d,
+	0x69, 0x74, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0b, 0x63,
+	0x6f, 0x6d, 0x6d, 0x69, 0x74, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x12, 0x1c, 0x0a, 0x09, 0x6e, 0x65,
+	0x78, 0x74, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x6e,
+	0x65, 0x78, 0x74, 0x69, 0x6e, 0x64, 0x65, 0x78, 0x22, 0x2b, 0x0a, 0x0f, 0x4c, 0x6f, 0x63, 0x61,
+	0x6c, 0x41, 0x45, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x73,
+	0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x07, 0x73, 0x75,
+	0x63, 0x63, 0x65, 0x73, 0x73, 0x42, 0x06, 0x5a, 0x04, 0x2e, 0x2f, 0x70, 0x62, 0x62, 0x06, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -783,7 +1014,7 @@ func file_raft_proto_rawDescGZIP() []byte {
 	return file_raft_proto_rawDescData
 }
 
-var file_raft_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_raft_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_raft_proto_goTypes = []interface{}{
 	(*Command)(nil),               // 0: chat.Command
 	(*LogEntry)(nil),              // 1: chat.LogEntry
@@ -794,31 +1025,37 @@ var file_raft_proto_goTypes = []interface{}{
 	(*ForwardLeaderRequest)(nil),  // 6: chat.ForwardLeaderRequest
 	(*ForwardLeaderResponse)(nil), // 7: chat.ForwardLeaderResponse
 	(*RequestVoteResponse)(nil),   // 8: chat.RequestVoteResponse
-	(*AppendChat)(nil),            // 9: chat.AppendChat
-	(*LikeMessage)(nil),           // 10: chat.LikeMessage
-	(*UnLikeMessage)(nil),         // 11: chat.UnLikeMessage
-	(*PrintChat)(nil),             // 12: chat.PrintChat
-	(*Logout)(nil),                // 13: chat.Logout
-	(*JoinChat)(nil),              // 14: chat.JoinChat
-	(*User)(nil),                  // 15: chat.User
+	(*MergeRequest)(nil),          // 9: chat.MergeRequest
+	(*MergeResponse)(nil),         // 10: chat.MergeResponse
+	(*LocalAERequest)(nil),        // 11: chat.LocalAERequest
+	(*LocalAEResponse)(nil),       // 12: chat.LocalAEResponse
+	(*AppendChat)(nil),            // 13: chat.AppendChat
+	(*LikeMessage)(nil),           // 14: chat.LikeMessage
+	(*UnLikeMessage)(nil),         // 15: chat.UnLikeMessage
+	(*PrintChat)(nil),             // 16: chat.PrintChat
+	(*Logout)(nil),                // 17: chat.Logout
+	(*JoinChat)(nil),              // 18: chat.JoinChat
+	(*User)(nil),                  // 19: chat.User
 }
 var file_raft_proto_depIdxs = []int32{
-	9,  // 0: chat.Command.append:type_name -> chat.AppendChat
-	10, // 1: chat.Command.like:type_name -> chat.LikeMessage
-	11, // 2: chat.Command.unlike:type_name -> chat.UnLikeMessage
-	12, // 3: chat.Command.print:type_name -> chat.PrintChat
-	13, // 4: chat.Command.logout:type_name -> chat.Logout
-	14, // 5: chat.Command.joinchat:type_name -> chat.JoinChat
-	15, // 6: chat.Command.login:type_name -> chat.User
+	13, // 0: chat.Command.append:type_name -> chat.AppendChat
+	14, // 1: chat.Command.like:type_name -> chat.LikeMessage
+	15, // 2: chat.Command.unlike:type_name -> chat.UnLikeMessage
+	16, // 3: chat.Command.print:type_name -> chat.PrintChat
+	17, // 4: chat.Command.logout:type_name -> chat.Logout
+	18, // 5: chat.Command.joinchat:type_name -> chat.JoinChat
+	19, // 6: chat.Command.login:type_name -> chat.User
 	0,  // 7: chat.LogEntry.Command:type_name -> chat.Command
 	0,  // 8: chat.CommitEntry.Command:type_name -> chat.Command
 	1,  // 9: chat.AppendEntriesRequest.Entries:type_name -> chat.LogEntry
 	0,  // 10: chat.ForwardLeaderRequest.Command:type_name -> chat.Command
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	1,  // 11: chat.MergeResponse.Entries:type_name -> chat.LogEntry
+	1,  // 12: chat.LocalAERequest.Entries:type_name -> chat.LogEntry
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_raft_proto_init() }
@@ -937,6 +1174,54 @@ func file_raft_proto_init() {
 				return nil
 			}
 		}
+		file_raft_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*MergeRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_raft_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*MergeResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_raft_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*LocalAERequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_raft_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*LocalAEResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	file_raft_proto_msgTypes[0].OneofWrappers = []interface{}{
 		(*Command_Append)(nil),
@@ -953,7 +1238,7 @@ func file_raft_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_raft_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

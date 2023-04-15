@@ -45,20 +45,14 @@ func (s *ChatServiceServer) CheckServerHealth() {
 }
 
 func (s *ChatServiceServer) RemoveActiveUsers() bool {
-	log.Printf("activeuserschecking1..")
 	activeusers := s.activeusersstore.activeusers
-	log.Printf("activeuserschecking2..")
 	activeusersgroups := s.activeusersstore.activeusergroup
-	log.Printf("activeuserschecking3..")
-	log.Printf("activeusergroup : %v", activeusersgroups)
 	if len(activeusers) == 0 {
 		log.Printf("No active users Connected")
 		return true
 	}
-	log.Printf("activeuserschecking4..")
 	for _, user := range activeusers {
 		//construct commmand to raft
-		log.Printf("activeuserschecking5..")
 		log.Printf("Activeuser %v ", user)
 		command := &pb.Command{
 			Event: "q",
@@ -69,7 +63,6 @@ func (s *ChatServiceServer) RemoveActiveUsers() bool {
 				},
 			},
 		}
-		log.Printf("activeuserschecking6..")
 		if s.raft.cm.Submit(command) {
 			log.Printf("User %v logged out", user.Name)
 		}
