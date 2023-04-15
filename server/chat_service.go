@@ -179,7 +179,7 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 			//add the newly joined group details to inmemory active users
 			s.activeusersstore.AddUser(user, groupname)
 			//send a response
-			group, _ := s.raft.cm.storage.GetGroup(groupname)
+			group := s.raft.cm.GetGroup(groupname)
 			resp := &pb.GroupChatResponse{
 				Group: group,
 				Event: event,
@@ -191,7 +191,7 @@ func (s *ChatServiceServer) JoinGroupChat(stream pb.ChatService_JoinGroupChatSer
 		}
 		//as we will not braodcast for p, send a response seperately.
 		if event == "p" {
-			group, _ := s.raft.cm.storage.GetGroup(groupname)
+			group := s.raft.cm.GetGroup(groupname)
 			resp := &pb.GroupChatResponse{
 				Group: group,
 				Event: event,
@@ -317,7 +317,7 @@ func (s *ChatServiceServer) BroadCast() {
 					delete(s.connstore.clients, stream)
 					continue
 				}
-				group, _ := s.raft.cm.storage.GetGroup(groupname)
+				group := s.raft.cm.GetGroup(groupname)
 				resp := &pb.GroupChatResponse{
 					Group: group,
 					Event: "b",

@@ -21,12 +21,19 @@ func main() {
 	flag.Parse()
 
 	//construct the IP
+	// serverId := *Id
+	// serverId_string := strconv.Itoa(serverId)
+	// IP_BASE := "172.30.100.10"
+	// port := ":12000"
+	// // port = ":12000"
+	// IP := IP_BASE + serverId_string + port
+
+	//constuct IP-development
 	serverId := *Id
 	serverId_string := strconv.Itoa(serverId)
-	IP_BASE := "172.30.100.10"
-	port := ":12000"
-	// port = ":12000"
-	IP := IP_BASE + serverId_string + port
+	IP_BASE := "0.0.0.0"
+	port := ":1200"
+	IP := IP_BASE + port + serverId_string
 
 	var wg sync.WaitGroup
 
@@ -49,6 +56,7 @@ func main() {
 	pb.RegisterRaftServiceServer(grpcserver, raftserver)
 
 	//Start Serving
+
 	raftserver.Serve()
 	grpcserver.Serve(listener)
 

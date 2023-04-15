@@ -19,8 +19,9 @@ type Server struct {
 	pb.UnimplementedRaftServiceServer
 	mu sync.Mutex
 
-	serverId int64
-	peerIds  []int64
+	serverId      int64
+	peerIds       []int64
+	activepeerIds []int64
 
 	cm       *ConsensusModule
 	listener net.Listener
@@ -45,15 +46,17 @@ func NewServer(serverId int64, Listener net.Listener) *Server {
 		}
 	}
 	s.peerIds = peerIds
-
 	s.commitChan = make(chan CommitEntry, 10)
+
 	s.peerClients = make(map[int64]*grpc.ClientConn)
 	s.ConnectAllPeers(serverId)
+	s.activepeerIds = s.GetActivePeers()
 	s.listener = Listener
 
 	s.ready = make(chan int, 10)
 	s.quit = make(chan interface{})
 	s.broadcast = make(chan string)
+
 	s.cm = NewConsensusModule(s.serverId, s.peerIds, s, s.ready, s.commitChan)
 
 	return s
@@ -78,12 +81,12 @@ func (s *Server) DisconnectAll() {
 }
 
 // shutdown the server and waits for it to shutdown gracefully
-// func (s *Server) shutdown() {
-// 	// s.cm.Stop()
-// 	close(s.quit)
-// 	s.listener.Close()
-// 	s.wg.Wait()
-// }
+func (s *Server) shutdown() {
+	// s.cm.Stop()
+	close(s.quit)
+	s.listener.Close()
+	// s.wg.Wait()
+}
 
 func (s *Server) GetListenAddr() net.Addr {
 	s.mu.Lock()
@@ -92,9 +95,12 @@ func (s *Server) GetListenAddr() net.Addr {
 }
 
 func (s *Server) GetPeerAddr(peerId int64) string {
-	IP_BASE := "172.30.100.10"
-	port := ":12000"
-	IP := IP_BASE + strconv.Itoa(int(peerId)) + port
+	// IP_BASE := "172.30.100.10"
+	// port := ":12000"
+	// IP := IP_BASE + strconv.Itoa(int(peerId)) + port
+	IP_BASE := "0.0.0.0"
+	port := ":1200"
+	IP := IP_BASE + port + strconv.Itoa(int(peerId))
 
 	return IP
 }
@@ -189,6 +195,40 @@ func (s *Server) persistData(commitentry CommitEntry) {
 	}
 
 }
+func (s *Server) persistTempData(commitentry CommitEntry) {
+	log.Printf("Data is being written to disk")
+	command := commitentry.Command
+	switch command.Event {
+	case "u":
+		user := command.GetLogin()
+		s.cm.tempstorage.SaveUser(user)
+	case "j":
+		joinchat := command.GetJoinchat()
+		if s.cm.tempstorage.RemoveUserInGroup(joinchat.Joineduser.Id, joinchat.Currgroup) {
+			s.cm.tempstorage.JoinGroup(joinchat.Newgroup, joinchat.Joineduser)
+		}
+		s.broadcast <- joinchat.Currgroup
+		s.broadcast <- joinchat.Newgroup
+	case "a":
+		append := command.GetAppend()
+		s.cm.tempstorage.AppendMessage(append)
+		s.broadcast <- append.Group.Groupname
+	case "l":
+		like := command.GetLike()
+		s.cm.tempstorage.LikeMessage(like)
+		s.broadcast <- like.Group.Groupname
+	case "r":
+		unlike := command.GetUnlike()
+		s.cm.tempstorage.UnLikeMessage(unlike)
+		s.broadcast <- unlike.Group.Groupname
+	case "q":
+		logout := command.GetLogout()
+		s.cm.tempstorage.DeleteUser(logout.User.Id)
+		s.cm.tempstorage.RemoveUserInGroup(logout.User.Id, logout.Currgroup)
+		s.broadcast <- logout.Currgroup
+	}
+
+}
 
 func (s *Server) GetActivePeers() []int64 {
 	var activepeers []int64
@@ -205,7 +245,7 @@ func (s *Server) GetActivePeers() []int64 {
 
 func (s *Server) checkPeerConnection(peerId int64) bool {
 	state := s.peerClients[peerId].GetState().String()
-	log.Printf("State of peer %v is %v", peerId, state)
+	// log.Printf("State of peer %v is %v", peerId, state)
 	if state == "IDLE" || state == "READY" {
 		return true
 	}

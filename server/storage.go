@@ -42,7 +42,15 @@ type DiskStore struct {
 	replicatedlog *raftbadger.Storage
 }
 
+// temp storage when no quorum
+type TempDiskStore struct {
+	mu            sync.Mutex
+	tempdiskstore *raftbadger.Storage
+	templog       *raftbadger.Storage
+}
+
 func NewDiskStore(serverId int64) *DiskStore {
+	//config for app data when raft in action
 	cfg_appdata := raftbadger.Config{
 		DataPath: "server/diskstore/server" + strconv.Itoa(int(serverId)),
 	}
@@ -58,10 +66,36 @@ func NewDiskStore(serverId int64) *DiskStore {
 	if err != nil {
 		panic(fmt.Sprintf("failed to create raft badger storage, err: %s", err.Error()))
 	}
+
 	RegisterCommands()
 	return &DiskStore{
 		diskstore:     diskstore,
 		replicatedlog: raftdiskstore,
+	}
+}
+
+func NewTempDiskStore(serverId int64) *TempDiskStore {
+	//config for app data when raft in action
+	cfg_appdata := raftbadger.Config{
+		DataPath: "server/diskstore/server" + strconv.Itoa(int(serverId)) + "/temp",
+	}
+	tempdiskstore, err := raftbadger.New(cfg_appdata, nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create temp raft badger storage, err: %s", err.Error()))
+	}
+	//config for raft
+	cfg_raftdata := raftbadger.Config{
+		DataPath: "server/diskstore/server" + strconv.Itoa(int(serverId)) + "/temp/raft",
+	}
+	templog, err := raftbadger.New(cfg_raftdata, nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create temp raft badger storage, err: %s", err.Error()))
+	}
+
+	RegisterCommands()
+	return &TempDiskStore{
+		tempdiskstore: tempdiskstore,
+		templog:       templog,
 	}
 }
 
@@ -140,7 +174,7 @@ func (store *DiskStore) UpdateGroup(groupname string, group *pb.Group) bool {
 	if err != nil {
 		return false
 	}
-	log.Printf("Deep copy of group is %v", groupcopy)
+	// log.Printf("Deep copy of group is %v", groupcopy)
 	var encoder bytes.Buffer
 	if err := gob.NewEncoder(&encoder).Encode(groupcopy); err != nil {
 		log.Fatal(err)
@@ -156,7 +190,7 @@ func (store *DiskStore) JoinGroup(groupname string, user *pb.User) {
 	group, found := store.GetGroup(groupname)
 	if found {
 		group.Participants[user.GetId()] = user.GetName()
-		log.Printf("updated group with the participants %v", group)
+		// log.Printf("updated group with the participants %v", group)
 		if store.UpdateGroup(groupname, group) {
 			log.Printf("user %v joined %v group", user.GetName(), groupname)
 			return
@@ -171,7 +205,7 @@ func (store *DiskStore) JoinGroup(groupname string, user *pb.User) {
 		Messages:     make(map[uint32]*pb.ChatMessage),
 	}
 	new_group.Participants[user.GetId()] = user.GetName()
-	log.Printf("Added participant to %v", new_group)
+	// log.Printf("Added participant to %v", new_group)
 	if store.UpdateGroup(groupname, new_group) {
 		log.Printf("user %v joined %v group", user.GetName(), groupname)
 		return
@@ -286,7 +320,7 @@ func (store *DiskStore) AppendMessage(appendchat *pb.AppendChat) {
 	if found {
 		appendmessagenumber := len(group.Messages)
 		group.Messages[uint32(appendmessagenumber)] = message
-		log.Printf("group %v: ", group)
+		// log.Printf("group %v: ", group)
 		if store.UpdateGroup(groupname, group) {
 			log.Printf("Appended new message in the group %v", group.Groupname)
 			return
@@ -364,5 +398,290 @@ func (store *DiskStore) UnLikeMessage(unlikemessage *pb.UnLikeMessage) {
 func checkError(err error) {
 	if err != nil {
 		panic(err)
+	}
+}
+
+func (store *TempDiskStore) SaveUser(user *pb.User) error {
+	usercopy := &pb.User{}
+	err := copier.Copy(usercopy, user)
+	if err != nil {
+		return fmt.Errorf("error while deepcopy user: %w", err)
+	}
+
+	var encoder bytes.Buffer
+	// gob.Register(pb.User)
+	if err := gob.NewEncoder(&encoder).Encode(usercopy); err != nil {
+		log.Fatal(err)
+	}
+	err = store.tempdiskstore.Set([]byte(strconv.Itoa(int(usercopy.Id))), encoder.Bytes())
+	checkError(err)
+
+	log.Printf("user %v logged in the server.User stored in the disk", user.GetName())
+	return nil
+}
+
+func (store *TempDiskStore) GetUser(userId uint32) *pb.User {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var user *pb.User
+	if usr, err := store.tempdiskstore.Get([]byte(strconv.Itoa(int(userId)))); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(usr))
+		if err := d.Decode(&user); err != nil {
+			return user
+		}
+	}
+	return user
+}
+
+func (store *TempDiskStore) DeleteUser(userId uint32) error {
+	err := store.tempdiskstore.Delete([]byte(strconv.Itoa(int(userId))))
+	checkError(err)
+
+	return nil
+}
+
+func (store *TempDiskStore) GetGroup(groupname string) (*pb.Group, bool) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var group *pb.Group
+	if grp, err := store.tempdiskstore.Get([]byte(groupname)); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(grp))
+		if err := d.Decode(&group); err != nil {
+			return group, false
+		}
+	} else {
+		log.Println("group not found in storage")
+		return nil, false
+	}
+	return group, true
+}
+
+func (store *TempDiskStore) UpdateGroup(groupname string, group *pb.Group) bool {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	groupcopy := &pb.Group{}
+	err := copier.Copy(groupcopy, group)
+	if err != nil {
+		return false
+	}
+	// log.Printf("Deep copy of group is %v", groupcopy)
+	var encoder bytes.Buffer
+	if err := gob.NewEncoder(&encoder).Encode(groupcopy); err != nil {
+		log.Fatal(err)
+	}
+	err = store.tempdiskstore.Set([]byte(groupname), encoder.Bytes())
+	checkError(err)
+	log.Println("Group info updated successfully in the disk")
+	return true
+}
+
+func (store *TempDiskStore) JoinGroup(groupname string, user *pb.User) {
+
+	group, found := store.GetGroup(groupname)
+	if found {
+		group.Participants[user.GetId()] = user.GetName()
+		// log.Printf("updated group with the participants %v", group)
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("user %v joined %v group", user.GetName(), groupname)
+			return
+		}
+
+	}
+	//if not found create one
+	new_group := &pb.Group{
+		GroupID:      uuid.New().ID(),
+		Groupname:    groupname,
+		Participants: make(map[uint32]string),
+		Messages:     make(map[uint32]*pb.ChatMessage),
+	}
+	new_group.Participants[user.GetId()] = user.GetName()
+	// log.Printf("Added participant to %v", new_group)
+	if store.UpdateGroup(groupname, new_group) {
+		log.Printf("user %v joined %v group", user.GetName(), groupname)
+		return
+	} else {
+		log.Println(" Failed to update the group")
+	}
+}
+
+func (store *TempDiskStore) RemoveUserInGroup(userID uint32, groupname string) bool {
+	group, found := store.GetGroup(groupname)
+	if found {
+		if group.Participants == nil || group.Participants[userID] == "" {
+			return true
+		}
+		delete(group.Participants, userID)
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("removed user from current group if any")
+			return true
+
+		}
+	} else {
+		log.Printf("Group is not present in disk yet.")
+		return true
+	}
+	return false
+}
+
+func (store *TempDiskStore) SetState(currentTerm int64, votedFor int64, logs []*pb.LogEntry) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	//store term data
+	var termData bytes.Buffer
+	if err := gob.NewEncoder(&termData).Encode(currentTerm); err != nil {
+		log.Fatal(err)
+	}
+	err := store.templog.Set([]byte("currentTerm"), termData.Bytes())
+	checkError(err)
+	//store votedFor data
+	var votedData bytes.Buffer
+	if err := gob.NewEncoder(&votedData).Encode(votedFor); err != nil {
+		log.Fatal(err)
+	}
+	store.templog.Set([]byte("votedFor"), votedData.Bytes())
+	//store the entire raftlog
+	var logData bytes.Buffer
+	// log.Printf("Trying to persist data2..")
+	gob.Register(logs)
+	if err := gob.NewEncoder(&logData).Encode(logs); err != nil {
+		log.Fatal(err)
+	}
+	// log.Printf("Trying to persist data3..")
+	store.templog.Set([]byte("log"), logData.Bytes())
+
+	return nil
+}
+
+func (store *TempDiskStore) GetState() (int64, int64, []*pb.LogEntry) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	var term int64
+	if termData, err := store.templog.Get([]byte("currentTerm")); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(termData))
+		if err := d.Decode(&term); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Fatal("currentTerm not found in storage")
+	}
+	var votedFor int64
+	if votedData, err := store.templog.Get([]byte("votedFor")); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(votedData))
+		if err := d.Decode(&votedFor); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Fatal("votedFor not found in storage")
+	}
+	var logs []*pb.LogEntry
+	if logData, err := store.templog.Get([]byte("log")); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(logData))
+		if err := d.Decode(&logs); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Fatal("log not found in storage")
+	}
+
+	return term, votedFor, logs
+}
+
+func (store *TempDiskStore) HasData() bool {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var logs []LogEntry
+	if logData, err := store.templog.Get([]byte("log")); err == nil {
+		d := gob.NewDecoder(bytes.NewBuffer(logData))
+		if err := d.Decode(&logs); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Printf("log not found in storage")
+	}
+
+	return len(logs) > 0
+}
+
+func (store *TempDiskStore) AppendMessage(appendchat *pb.AppendChat) {
+	groupname := appendchat.Group.Groupname
+	message := appendchat.Chatmessage
+	group, found := store.GetGroup(groupname)
+	if found {
+		appendmessagenumber := len(group.Messages)
+		group.Messages[uint32(appendmessagenumber)] = message
+		// log.Printf("group %v: ", group)
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("Appended new message in the group %v", group.Groupname)
+			return
+		}
+
+	}
+}
+
+func (store *TempDiskStore) LikeMessage(likemessage *pb.LikeMessage) {
+	groupname := likemessage.Group.Groupname
+	group, found := store.GetGroup(groupname)
+	if found {
+
+		likemessagenumber := likemessage.Messageid
+		//validate the message
+		message, found := group.Messages[likemessagenumber]
+		if !found {
+			log.Printf("Message not found")
+			return
+		}
+		if message.MessagedBy.Name == likemessage.Likeduser.Name {
+			log.Printf("Cannot Like own message")
+			return
+		}
+		likedusername, found := message.LikedBy[likemessage.Likeduser.Name]
+		if found {
+			log.Printf("already Liked the message")
+			return
+		}
+
+		//like
+		if len(message.LikedBy) == 0 {
+			message.LikedBy = make(map[string]string)
+		}
+		message.LikedBy[likemessage.Likeduser.Name] = likedusername
+
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("Liked message in the group %v", group.Groupname)
+			return
+		}
+
+	}
+}
+
+func (store *TempDiskStore) UnLikeMessage(unlikemessage *pb.UnLikeMessage) {
+	groupname := unlikemessage.Group.Groupname
+	group, found := store.GetGroup(groupname)
+	if found {
+		unlikemessagenumber := unlikemessage.Messageid
+		//validate the message
+		message, found := group.Messages[unlikemessagenumber]
+		if !found {
+			log.Printf("Message not found")
+			return
+		}
+		if message.MessagedBy.Name == unlikemessage.Unlikeduser.Name {
+			log.Printf("Cannot unLike own message")
+			return
+		}
+		_, found = message.LikedBy[unlikemessage.Unlikeduser.Name]
+		if !found {
+			log.Printf("its not liked")
+			return
+		}
+
+		//unlike
+		delete(message.LikedBy, unlikemessage.Unlikeduser.Name)
+		if store.UpdateGroup(groupname, group) {
+			log.Printf("Unliked message in the group %v", group.Groupname)
+			return
+		}
+
 	}
 }

@@ -79,8 +79,12 @@ type ConsensusModule struct {
 
 	//persistance storage of app data and raft data
 	storage *DiskStore
+	//persistance of data and localraft data when no quorum
+	tempstorage *TempDiskStore
 
 	commitChan chan CommitEntry
+	//chan to commit in tempsidkstore
+	tempcommitchan chan CommitEntry
 
 	//internal notification channel used by go routines to notify that newly commited entries may be sent
 	//on commitChan
@@ -94,6 +98,7 @@ type ConsensusModule struct {
 	currentTerm int64
 	votedFor    int64
 	log         []*pb.LogEntry
+	templog     []*pb.LogEntry
 
 	//raft state volatile on all servers
 	commitIndex        int64
@@ -116,6 +121,7 @@ func NewConsensusModule(id int64, peerIds []int64, server *Server, ready <-chan 
 	cm.peerIds = peerIds
 	cm.server = server
 	cm.commitChan = commitChan
+	cm.tempcommitchan = make(chan CommitEntry, 10)
 	cm.newCommitReadyChan = make(chan int64, 16)
 	cm.triggerAEChan = make(chan int)
 	cm.state = Follower
@@ -125,6 +131,7 @@ func NewConsensusModule(id int64, peerIds []int64, server *Server, ready <-chan 
 	cm.matchIndex = make(map[int64]int64)
 	cm.commitIndex = -1
 	cm.storage = NewDiskStore(cm.id)
+	cm.tempstorage = NewTempDiskStore(cm.id)
 
 	//restore the state from the persisted storage
 	if cm.storage.HasData() {
@@ -159,7 +166,7 @@ func (cm *ConsensusModule) Report() (id int64, term int64, isLeader bool) {
 func (cm *ConsensusModule) Submit(command *pb.Command) bool {
 	cm.mu.Lock()
 
-	log.Printf("Submit received by %v: %v", cm.state, command)
+	log.Printf("Submit received by %v", cm.state)
 	if cm.state == Leader {
 		cm.log = append(cm.log, &pb.LogEntry{Command: command, Term: cm.currentTerm})
 		cm.mu.Unlock()
@@ -168,6 +175,12 @@ func (cm *ConsensusModule) Submit(command *pb.Command) bool {
 		cm.triggerAEChan <- 1
 
 		return true
+	} else if len(cm.server.activepeerIds) <= 2 {
+		cm.templog = append(cm.templog, &pb.LogEntry{Command: command, Term: cm.currentTerm})
+		cm.mu.Unlock()
+		cm.persistToTempStorage()
+		return true
+
 	} else {
 		cm.mu.Unlock()
 		cm.forwardToLeader(command)
@@ -375,6 +388,14 @@ func (cm *ConsensusModule) startElection() {
 
 	votesReceived := 1
 
+	//if no quorum is present
+	cm.mu.Lock()
+	if len(cm.server.activepeerIds) <= 2 {
+		log.Printf("Found the active peer less than majority. Starting local instance.")
+		cm.mu.Unlock()
+		cm.InitialiseLocalRaft()
+	}
+
 	//send RequestVote RPC's to all the servers Concurrently, to collect the votes
 	for _, peerId := range cm.peerIds {
 		go func(peerId int64) {
@@ -581,10 +602,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 				defer cm.mu.Unlock()
 				//As we got a response check if the peer is connected to the cm.
 				// log.Printf("AppendEntries reply from %d !success: nextIndex := %d", peerId, ni-1)
-				if cm.server.peerClients[peerId] == nil {
-					log.Printf("Peer %v connected back.", peerId)
-					cm.server.ReconnectToPeer(peerId)
-				}
+
 				if reply.Term > cm.currentTerm {
 					// log.Printf("term out of date in heartbeat reply")
 					cm.becomeFollower(reply.Term)
@@ -667,7 +685,7 @@ func (cm *ConsensusModule) commitChanSender() {
 		for i, entry := range entries {
 			cm.commitChan <- CommitEntry{
 				Command: entry.Command,
-				Index:   savedLastApplied + int64(i+1),
+				Index:   savedLastApplied + int64(i) + 1,
 				Term:    savedTerm,
 			}
 
@@ -722,4 +740,55 @@ func (cm *ConsensusModule) persistToStorage() {
 		// log.Printf("State successFully persisted in the term %v", cm.currentTerm)
 	}
 
+}
+
+// Saves all the CM's persistant state
+func (cm *ConsensusModule) persistToTempStorage() {
+	log.Printf("Trying to persist tempdata1..")
+	err := cm.tempstorage.SetState(cm.currentTerm, cm.votedFor, cm.log)
+	if err == nil {
+		log.Printf("State successFully temp persisted in the term %v", cm.currentTerm)
+		return
+
+	}
+
+}
+func (cm *ConsensusModule) tempcommitEntries() {
+	for {
+		log.Printf("It is in the CommitEntries function")
+		entry := <-cm.tempcommitchan
+		cm.server.persistTempData(entry)
+	}
+}
+
+func (cm *ConsensusModule) pullRaftState() {
+	cm.mu.Lock()
+
+	cm.tempstorage.tempdiskstore = cm.storage.diskstore
+	// cm.tempstorage.templog = cm.storage.replicatedlog
+
+	cm.mu.Unlock()
+	log.Printf("Complete raft status is pulled to temp successfully")
+
+}
+
+func (cm *ConsensusModule) InitialiseLocalRaft() {
+	go cm.tempcommitEntries()
+	//get the latest state of the raft
+	cm.pullRaftState()
+	//initialise templog
+	cm.templog = make([]*pb.LogEntry, 0)
+	log.Printf("Local Raft succesfully initialised")
+
+}
+
+func (cm *ConsensusModule) GetGroup(groupname string) *pb.Group {
+	cm.mu.Lock()
+	if len(cm.server.activepeerIds) <= 2 {
+		group, _ := cm.tempstorage.GetGroup(groupname)
+		return group
+	} else {
+		group, _ := cm.storage.GetGroup(groupname)
+		return group
+	}
 }

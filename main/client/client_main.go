@@ -70,7 +70,7 @@ func ConnectClient(ip string, port string) {
 	serverId := int(ip[len(ip)-1])
 	clientstore := client.NewInMemoryClientStore()
 	chatclient := client.NewChatServiceClient(pb.NewChatServiceClient(conn), pb.NewAuthServiceClient(conn), clientstore, serverId)
-	time.Sleep(5 * time.Second)
+	time.Sleep(3 * time.Second)
 	Event := "Login: "
 	for {
 		state := conn.GetState().String()
