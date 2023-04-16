@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// raft server which maintains the raft state and allow communications between servers.
 type Server struct {
 	pb.UnimplementedRaftServiceServer
 	mu sync.Mutex
@@ -62,6 +63,7 @@ func NewServer(serverId int64, Listener net.Listener) *Server {
 	return s
 }
 
+// start the raft server
 func (s *Server) Serve() {
 	log.Printf("[%v] listening at %s", s.serverId, s.listener.Addr())
 	// s.wg.Add(1)
@@ -170,6 +172,8 @@ func (s *Server) LocalAEs(ctx context.Context, req *pb.LocalAERequest) (*pb.Loca
 	return s.cm.SendLocalAEsHelper(req)
 }
 
+// data being persisted to storage. After every persistance event, broadcast is sent
+// to the users in the group updated.
 func (s *Server) persistData(commitentry CommitEntry) {
 	log.Printf("Data is being written to disk")
 	command := commitentry.Command
@@ -252,6 +256,7 @@ func (s *Server) GetActivePeers() []int64 {
 	return activepeers
 }
 
+// check the connection if it is still alive
 func (s *Server) checkPeerConnection(peerId int64) bool {
 	state := s.peerClients[peerId].GetState().String()
 	// log.Printf("State of peer %v is %v", peerId, state)

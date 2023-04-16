@@ -14,14 +14,13 @@ type ConnStore interface {
 }
 
 type InMememoryActiveUsersStore struct {
-	mutex           sync.RWMutex
 	activeusers     []*pb.User
 	activeusergroup map[uint32]string
 }
 
 func NewInMemoryActiveUsersStore() *InMememoryActiveUsersStore {
 	return &InMememoryActiveUsersStore{
-		activeusers:     make([]*pb.User,0),
+		activeusers:     make([]*pb.User, 0),
 		activeusergroup: make(map[uint32]string),
 	}
 }

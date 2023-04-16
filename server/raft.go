@@ -19,7 +19,7 @@ type Command struct {
 }
 
 // Data reported by the raft to the commit channel. Each commit notifies that the consensus is achieved
-// on a command and it can be applied to the clients state machine.
+// on a command and it can be applied to the all state machines.
 type CommitEntry struct {
 	//command being commited
 	Command *pb.Command
@@ -95,12 +95,11 @@ type ConsensusModule struct {
 	votedFor    int64
 	log         []*pb.LogEntry
 
-	//temp storage persistance when no quorum
+	//temp storage persistance when no quorum (1 or 2 servers)
 	tempstorage        *TempDiskStore
 	localraft          bool
 	tempcommitchan     chan CommitEntry
 	templog            []*pb.LogEntry
-	templogterm        int64
 	triggerLocalAEChan chan int
 	tempcommitindex    int64
 	nexttempindex      int64
@@ -165,262 +164,18 @@ func NewConsensusModule(id int64, peerIds []int64, server *Server, ready <-chan 
 	return cm
 }
 
-// Reprts the current state of the CM
-func (cm *ConsensusModule) Report() (id int64, term int64, isLeader bool) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	return cm.id, cm.currentTerm, cm.state == Leader
-}
-
-func (cm *ConsensusModule) Submit(command *pb.Command) bool {
-	cm.mu.Lock()
-
-	log.Printf("Submit received by %v", cm.state)
-	if cm.state == Leader {
-		cm.log = append(cm.log, &pb.LogEntry{Command: command, Term: cm.currentTerm})
-		cm.mu.Unlock()
-		cm.persistToStorage()
-		// log.Printf("... log=%v", cm.log)
-		cm.triggerAEChan <- 1
-
-		return true
-	} else if cm.localraft {
-		log.Printf("Theere is no leader yet. Still trying to progess")
-		if len(cm.server.activepeerIds) > 0 && cm.server.activepeerIds[0] < cm.id {
-			cm.mu.Unlock()
-			cm.forwardToLeader(command)
-		} else {
-			cm.templog = append(cm.templog, &pb.LogEntry{Command: command, Term: cm.currentTerm})
-			cm.mu.Unlock()
-			cm.persistToTempStorage()
-			log.Printf("Setting the local AE chan ..")
-			cm.triggerLocalAEChan <- 1
-		}
-
-		return true
-
-	} else {
-		cm.mu.Unlock()
-		cm.forwardToLeader(command)
-		return true
-
-	}
-}
-
-// Stop stops this CM, cleaning up its state. This method returns quickly, but
-// it may take a bit of time (up to ~election timeout) for all goroutines to
-// exit.
-func (cm *ConsensusModule) Stop() {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	cm.state = Dead
-	log.Printf("becomes Dead")
-	close(cm.newCommitReadyChan)
-}
-
-func (cm *ConsensusModule) RequestVoteHelper(req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	reply := &pb.RequestVoteResponse{}
-	if cm.state == Dead {
-		return reply, nil
-	}
-	lastLogIndex, LastLogTerm := cm.lastLogIndexAndTerm()
-	// log.Printf("Working with GRPC")
-	// log.Printf("RequestVote: %v [currentTerm = %v, votedFor = %v, log index/term= (%d,%d)]", req, cm.currentTerm, cm.votedFor, lastLogIndex, LastLogTerm)
-
-	//if a term received is greater than the current term..become a follower
-	if req.Term > cm.currentTerm {
-		// log.Printf("Current term out of date..")
-		cm.becomeFollower(req.Term)
-	}
-
-	//if term matches
-	//if cm didnot vote for any candidate yet..vote
-	//if already voted..ignore
-	if cm.currentTerm == req.Term &&
-		(cm.votedFor == -1 || cm.votedFor == req.CandidateId) &&
-		(req.LastLogTerm > LastLogTerm ||
-			(req.LastLogTerm == LastLogTerm && req.LastLogIndex >= lastLogIndex)) {
-		reply.VoteGranted = true
-		cm.votedFor = req.CandidateId
-		cm.electionResetEvent = time.Now()
-	} else {
-		reply.VoteGranted = false
-	}
-
-	reply.Term = cm.currentTerm
-	cm.persistToStorage()
-	// log.Printf("Requestvote Reply of %v: %v", cm.server.serverId, reply)
-	return reply, nil
-}
-
-func (cm *ConsensusModule) ForwardLeaderHelper(req *pb.ForwardLeaderRequest) (*pb.ForwardLeaderResponse, error) {
-	reply := &pb.ForwardLeaderResponse{}
-	if cm.state == Dead {
-		return reply, nil
-	}
-
-	log.Printf("Got the forwarded Command: %v", cm.leaderid)
-
-	reply.Success = false
-	//if cm is leader
-	if cm.state == Leader || cm.localraft {
-		log.Printf("I'm the leader/virtual leader, so Commiting to log and sending to followers")
-		if cm.Submit(req.Command) {
-			reply.Success = true
-			reply.LeaderId = cm.id
-		}
-	} else {
-		reply.Success = false
-		reply.LeaderId = cm.leaderid
-	}
-
-	return reply, nil
-}
-
-func (cm *ConsensusModule) AppendEntriesHelper(req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	reply := &pb.AppendEntriesResponse{}
-	if cm.state == Dead {
-		return reply, nil
-	}
-	// log.Printf("AppendEntries: %v", req)
-	//update the current leader details
-	cm.leaderid = req.LeaderId
-
-	//if a term received is greater than the current term..become a follower
-	if req.Term > cm.currentTerm {
-		// log.Printf("Current term out of date..")
-		cm.becomeFollower(req.Term)
-	}
-	reply.Success = false
-	if req.Term == cm.currentTerm {
-		//it may happen that two leaders exists in same term..make later as follower
-		if cm.state != Follower {
-			cm.becomeFollower(req.Term)
-		}
-		cm.electionResetEvent = time.Now()
-
-		//Does our log contains an Entry at PrevLogIndex whose term matches
-		if req.PrevLogIndex == -1 ||
-			(int(req.PrevLogIndex) < len(cm.log) && req.PrevLogTerm == cm.log[req.PrevLogIndex].Term) {
-			reply.Success = true
-			//find an insertion point - where theres a term mismatch between
-			//the existing log starting at PrevLogIndex+1 and the new entries sent in the RPC
-			logInsertIndex := req.PrevLogIndex + 1
-			newEntriesIndex := 0
-
-			for {
-				if int(logInsertIndex) >= len(cm.log) || newEntriesIndex >= len(req.Entries) {
-					break
-				}
-				if cm.log[logInsertIndex].Term != req.Entries[newEntriesIndex].Term {
-					break
-				}
-				logInsertIndex++
-				newEntriesIndex++
-			}
-			//by the end of the loop:
-			// - logInsertIndex points to the end of the log, or an index
-			//where the tem mismatches wit an entry from the leader
-			// -newEntriesIndex points to the End of the entries, or an index
-			//where the term mismatches with the corresponding log entry
-			if newEntriesIndex < len(req.Entries) {
-				// log.Printf("... inserting %v from index %d", req.Entries[newEntriesIndex:], logInsertIndex)
-				cm.log = append(cm.log[:logInsertIndex], req.Entries[newEntriesIndex:]...)
-				// log.Printf("... log is now: %v", cm.log)
-			}
-
-			//set commit index
-			if req.LeaderCommit > cm.commitIndex {
-				cm.commitIndex = int64(intMin(int(req.LeaderCommit), len(cm.log)-1))
-				log.Printf("... setting commitIndex=%d", cm.commitIndex)
-				cm.newCommitReadyChan <- 1
-			}
-		}
-	}
-
-	reply.Term = cm.currentTerm
-	cm.persistToStorage()
-	// log.Printf("AppendEntries reply : %v", reply)
-	return reply, nil
-}
-
-func (cm *ConsensusModule) GetTempLogsHelper(req *pb.MergeRequest) (*pb.MergeResponse, error) {
-	reply := &pb.MergeResponse{}
-	if cm.state == Dead {
-		return reply, nil
-	}
-
-	log.Printf("Seems like a leader is elected. Checking my templog to send to leader")
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	cm.leaderid = req.Leaderid
-	var tempentries []*pb.LogEntry
-	lowestpeerIdnumber := cm.id
-	for _, peerid := range cm.server.activepeerIds {
-		if lowestpeerIdnumber > peerid {
-			lowestpeerIdnumber = peerid
-		}
-	}
-	if cm.localraft && lowestpeerIdnumber == cm.id {
-		log.Printf("Seems like Im the smallest Peer. Sending my temp log")
-		tempentries = cm.templog
-		reply.Entries = tempentries
-		reply.IsTempLog = true
-	} else {
-		log.Printf("I dont have to send. My smaller active peer might have sent it")
-		reply.IsTempLog = false
-	}
-	cm.closeLocalRaft()
-	return reply, nil
-
-}
-
-func (cm *ConsensusModule) SendLocalAEsHelper(req *pb.LocalAERequest) (*pb.LocalAEResponse, error) {
-	reply := &pb.LocalAEResponse{}
-	if cm.state == Dead {
-		return reply, nil
-	}
-
-	log.Printf("Got the Local AE from my virtual leader. Honoring it")
-
-	//directly append the log
-	cm.templog = append(cm.templog, req.Entries...)
-
-	//get the commit index
-	savedtempcommitindex := cm.tempcommitindex
-
-	log.Printf("commit index is %v", cm.tempcommitindex)
-
-	commitentries := cm.templog[savedtempcommitindex:]
-	log.Printf("commitentries %v ", commitentries)
-	for _, entry := range commitentries {
-		cm.tempcommitchan <- CommitEntry{
-			Command: entry.Command,
-			Index:   cm.tempcommitindex + 1,
-			Term:    cm.currentTerm,
-		}
-		cm.tempcommitindex++
-	}
-
-	reply.Success = true
-	return reply, nil
-
-}
-
+// The randamized timeout for elections
 func (cm *ConsensusModule) electionTimeout() time.Duration {
 	return time.Duration(150+rand.Intn(150)) * time.Millisecond
 }
 
+// ticking the election timeout. if timed out, the election starts
+// and cm becomes candidate
 func (cm *ConsensusModule) runElectionTimer() {
 	timeoutDuration := cm.electionTimeout()
 	cm.mu.Lock()
 	termStarted := cm.currentTerm
 	cm.mu.Unlock()
-	// log.Printf("Election time started (%v), term=%d", timeoutDuration, termStarted)
 
 	//This loops until
 	//1. When election timer is no longer needed
@@ -433,21 +188,19 @@ func (cm *ConsensusModule) runElectionTimer() {
 
 		cm.mu.Lock()
 
-		//if its a leader . stop the timer
+		//if its a leader,stop the timer
 		if cm.state != Candidate && cm.state != Follower {
-			// log.Printf("in election timer, state= %s, bailing out as Im the leader already", cm.state)
 			cm.mu.Unlock()
 			return
 		}
 
 		//if terms dont match. stop the timer
 		if termStarted != cm.currentTerm {
-			// log.Printf("in election timer, term changed from %d to %d, bailing out", termStarted, cm.currentTerm)
 			cm.mu.Unlock()
 			return
 		}
 
-		//if cm is follower and didnt hear from leader for the duration of timeout
+		//if cm is follower election timer timedout
 		//start the Election
 		if elapsed := time.Since(cm.electionResetEvent); elapsed >= timeoutDuration {
 			cm.startElection()
@@ -458,24 +211,22 @@ func (cm *ConsensusModule) runElectionTimer() {
 	}
 }
 
+// start the election and collects votes through RequestVote RPC
+// restarts until there is a leader.
 func (cm *ConsensusModule) startElection() {
 	cm.state = Candidate
 	cm.currentTerm += 1
 	savedCurrentTerm := cm.currentTerm
 	cm.electionResetEvent = time.Now()
 	cm.votedFor = cm.id
-	// log.Printf("becomes Candidate (currentTerm=%d); log= %v", savedCurrentTerm, cm.log)
-
+	log.Printf("Elections Started. Became Candidate. current term: %v", savedCurrentTerm)
 	votesReceived := 1
+
+	//check if there is a quorum. if there is no quorum
+	//start local raft to make progress
 	cm.server.activepeerIds = cm.server.GetActivePeers()
-	if len(cm.server.activepeerIds) <= 2 && !cm.localraft {
-
-		//if no quorum is present
-		log.Printf("Checking connected peers number..")
-		log.Printf("number of active peers : %v", len(cm.server.activepeerIds))
-
-		log.Printf("Found the active peer less than majority. Starting local instance.")
-		cm.templogterm = savedCurrentTerm
+	if len(cm.server.activepeerIds) < 2 && !cm.localraft {
+		log.Printf("Found the active peers (%v) less than majority. Starting local instance", cm.server.activepeerIds)
 		cm.InitialiseLocalRaft()
 	}
 
@@ -494,40 +245,27 @@ func (cm *ConsensusModule) startElection() {
 			}
 			var reply pb.RequestVoteResponse
 
-			// log.Printf("Sending RequestVote to %d: %+v", peerId, args)
-			// cm.server.ReconnectToPeer(peerId)
-
 			err := cm.server.peerClients[peerId].Invoke(context.Background(), "/chat.RaftService/RequestVote", args, &reply)
 			if err == nil {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
-				// log.Printf("received RequestVoteReply %+v", &reply)
-				//As we got a response check if the peer is connected to the cm.
-				if cm.server.peerClients[peerId] == nil {
-					log.Printf("Peer %v connected back.", peerId)
-					cm.server.ReconnectToPeer(peerId)
-				}
 				//when other RV calls received a majority, then election might have already been done
 				if cm.state == Leader {
-					// log.Printf("While waiting for reply, State changed to %v", cm.state)
 					cm.startLeader()
 					return
 				}
 				if cm.state == Follower {
-					// log.Printf("While waiting for reply, State changed to Follower")
 					return
 				}
 
 				//if cm finds that its term is stale, become follower. else proceed with voting
 				if reply.Term > savedCurrentTerm {
-					// log.Printf("term out of date in RequestVoteReply")
 					cm.becomeFollower(reply.Term)
 					return
 				} else if reply.Term == savedCurrentTerm {
 					if reply.VoteGranted {
 						votesReceived += 1
 						if votesReceived*2 > len(cm.peerIds)+1 {
-							// log.Printf("Wins election with %d other votes", votesReceived-1)
 							go cm.startLeader()
 							return
 						}
@@ -542,23 +280,13 @@ func (cm *ConsensusModule) startElection() {
 	go cm.runElectionTimer()
 }
 
-// becomes a floower ans changes its state
-func (cm *ConsensusModule) becomeFollower(term int64) {
-	// log.Printf("Become follower with term = %v, log = %v", term, cm.log)
-	cm.state = Follower
-	cm.currentTerm = term
-	cm.votedFor = -1
-	cm.electionResetEvent = time.Now()
-
-	go cm.runElectionTimer()
-}
-
+// If this cm has been elected as leader. It starts leader duties.
 func (cm *ConsensusModule) startLeader() {
 	cm.state = Leader
 	cm.leaderid = cm.id
-	// log.Printf("Becomes Leader; term = %d, log=%v", cm.currentTerm, cm.log)
+	log.Printf("Becomes Leader; term = %d", cm.currentTerm)
 
-	//As I'm the leader, merging all the temp logs
+	//more info near its definition
 	cm.MergeTempLogs()
 
 	for _, peerId := range cm.peerIds {
@@ -569,13 +297,12 @@ func (cm *ConsensusModule) startLeader() {
 	// This goroutine runs in the background and sends AEs to peers:
 	// * Whenever something is sent on triggerAEChan
 	// * ... Or every 50 ms, if no events occur on triggerAEChan
-
 	go func(heartbeatTimeout time.Duration) {
 		// Immediately send AEs to peers.
 		cm.leaderSendAEs()
-
 		t := time.NewTimer(heartbeatTimeout)
 		defer t.Stop()
+		log.Printf("Leader is starts heart beats..")
 		for {
 			doSend := false
 			select {
@@ -587,7 +314,6 @@ func (cm *ConsensusModule) startLeader() {
 				t.Reset(heartbeatTimeout)
 			case ok := <-cm.triggerAEChan:
 				if ok == 1 {
-					// log.Printf("AE channnel triggered..")
 					doSend = true
 				} else {
 					return
@@ -599,7 +325,7 @@ func (cm *ConsensusModule) startLeader() {
 				}
 				t.Reset(heartbeatTimeout)
 			}
-
+			//if any of the above case is true
 			if doSend {
 				// If this isn't a leader any more, stop the heartbeat loop.
 				cm.mu.Lock()
@@ -614,89 +340,6 @@ func (cm *ConsensusModule) startLeader() {
 	}(50 * time.Millisecond)
 }
 
-func (cm *ConsensusModule) MergeTempLogs() {
-	log.Printf("Leader is elected. Merging all the temp logs")
-	//closing my localraft
-	templogslist := make([][]*pb.LogEntry, 6)
-	templogslist[cm.id] = cm.templog
-	for _, peerId := range cm.peerIds {
-		go func(peerId int64) {
-			cm.mu.Lock()
-			args := &pb.MergeRequest{
-				Leaderid: cm.id,
-			}
-			cm.mu.Unlock()
-			var reply pb.MergeResponse
-			err := cm.server.peerClients[peerId].Invoke(context.Background(), "/chat.RaftService/GetTempLogs", args, &reply)
-			if err == nil {
-				cm.mu.Lock()
-				defer cm.mu.Unlock()
-				if reply.IsTempLog {
-					templogslist[peerId] = reply.Entries
-				}
-			}
-		}(peerId)
-	}
-	log.Printf("Picked all the templogs")
-	cm.MergetoRaftLog(templogslist)
-
-	cm.closeLocalRaft()
-
-}
-
-func (cm *ConsensusModule) MergetoRaftLog(templogslist [][]*pb.LogEntry) {
-	for _, templogs := range templogslist {
-		cm.log = append(cm.log, templogs...)
-	}
-	log.Printf("Merged raft log : %v", cm.log)
-	// cm.newCommitReadyChan <- int64(1)
-
-}
-
-func (cm *ConsensusModule) closeLocalRaft() {
-	log.Printf("Closing the local raft as leader is back")
-	log.Printf("Local Raft succesfully closed. Into the main Raft again")
-	cm.localraft = false
-	cm.commitIndex = 0
-	cm.nexttempindex = 0
-}
-
-func (cm *ConsensusModule) forwardToLeader(command *pb.Command) {
-	if cm.state != Leader {
-		go func() {
-			log.Printf("Sorry, I'm not the leader . forwarding ")
-
-			args := &pb.ForwardLeaderRequest{
-				Command: command,
-			}
-			var reply pb.ForwardLeaderResponse
-			cm.mu.Lock()
-			peerid := cm.leaderid
-			if cm.localraft {
-				peerid = cm.server.activepeerIds[0]
-			}
-
-			cm.mu.Unlock()
-			// log.Printf("Sending RequestVote to %d: %+v", peerId, args)
-			log.Printf("forwarding to Leader server %v", cm.leaderid)
-			err := cm.server.peerClients[peerid].Invoke(context.Background(), "/chat.RaftService/ForwardLeader", args, &reply)
-			if err == nil {
-
-				log.Printf("received LeaderReply %v", &reply)
-
-				if reply.Success {
-					log.Printf("Succesfully forwarded the request to leader")
-					cm.newCommitReadyChan <- int64(1)
-				} else {
-					cm.leaderid = reply.LeaderId
-					cm.forwardToLeader(command)
-				}
-			}
-		}()
-
-	}
-}
-
 // sends a round of AEs to all peers, collects their
 // replies and adjusts cm's state.
 func (cm *ConsensusModule) leaderSendAEs() {
@@ -707,6 +350,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 	}
 	savedCurrentTerm := cm.currentTerm
 	cm.mu.Unlock()
+	//send AE's to all the peers
 	for _, peerId := range cm.peerIds {
 		go func(peerId int64) {
 			cm.mu.Lock()
@@ -717,8 +361,7 @@ func (cm *ConsensusModule) leaderSendAEs() {
 				prevLogTerm = cm.log[prevLogIndex].Term
 			}
 			entries := cm.log[ni:]
-			// log.Printf("Entries : %v",entries)
-
+			//construct AE request
 			args := &pb.AppendEntriesRequest{
 				Term:         savedCurrentTerm,
 				LeaderId:     cm.id,
@@ -728,23 +371,19 @@ func (cm *ConsensusModule) leaderSendAEs() {
 				LeaderCommit: cm.commitIndex,
 			}
 			cm.mu.Unlock()
-			// log.Printf("sending AppendEntries to %v: ni=%d, args=%+v", peerId, ni, args)
 			var reply pb.AppendEntriesResponse
 			err := cm.server.peerClients[peerId].Invoke(context.Background(), "/chat.RaftService/AppendEntries", args, &reply)
 			if err == nil {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
-				//As we got a response check if the peer is connected to the cm.
-				// log.Printf("AppendEntries reply from %d !success: nextIndex := %d", peerId, ni-1)
 
+				//if reply term exceeded become follower
 				if reply.Term > cm.currentTerm {
-					// log.Printf("term out of date in heartbeat reply")
 					cm.becomeFollower(reply.Term)
 					return
 				}
-
+				//if the append entry is accepted by the follower
 				if cm.state == Leader && savedCurrentTerm == reply.Term {
-					//if the append entry is accepted by the follower
 					if reply.Success {
 						cm.nextIndex[peerId] = ni + int64(len(entries))
 						cm.matchIndex[peerId] = cm.nextIndex[peerId] - 1
@@ -763,7 +402,6 @@ func (cm *ConsensusModule) leaderSendAEs() {
 								}
 							}
 						}
-						// log.Printf("AppendEntries reply from %d success: nextIndex := %v, matchIndex := %v; commitIndex := %d", peerId, cm.nextIndex, cm.matchIndex, cm.commitIndex)
 						if cm.commitIndex != savedCommitIndex {
 							log.Printf("leader sets commitIndex := %d", cm.commitIndex)
 							// Commit index changed: the leader considers new entries to be
@@ -795,9 +433,72 @@ func (cm *ConsensusModule) leaderSendAEs() {
 			}
 		}(peerId)
 	}
-	// log.Printf("Leader Send AE's finished")
 }
 
+// every chat client command is submitted here to the raft or local raft
+func (cm *ConsensusModule) Submit(command *pb.Command) bool {
+	cm.mu.Lock()
+	log.Printf("New command received")
+	//if the cm is leader, honor the request
+	if cm.state == Leader {
+		log.Printf("Main raft honoring the request")
+		cm.log = append(cm.log, &pb.LogEntry{Command: command, Term: cm.currentTerm})
+		cm.mu.Unlock()
+		//persist to storage immediately
+		cm.persistToStorage()
+		//notify others of the change
+		cm.triggerAEChan <- 1
+		return true
+		// if the cm is in localraft state. cm continues to serve the clients
+	} else if cm.localraft {
+		log.Printf("Local raft honoring the request")
+		//if 1 more peer is connected and its server id is smaller than this one
+		//forward the request as small server ID peer is virtual leader in local raft state
+		if len(cm.server.activepeerIds) > 0 && cm.server.activepeerIds[0] < cm.id {
+			log.Printf("have an active peer. Peer id is %v where as our id is %v", cm.server.activepeerIds, cm.id)
+			cm.mu.Unlock()
+			cm.forwardToLeader(command)
+			//if our id is smaller. then honor it
+		} else {
+			cm.templog = append(cm.templog, &pb.LogEntry{Command: command, Term: cm.currentTerm})
+			cm.mu.Unlock()
+			//persist the state immediately
+			cm.persistToStorage()
+			cm.triggerLocalAEChan <- 1
+		}
+		return true
+		//if in raft state and is a follower, forward it to leader
+	} else {
+		cm.mu.Unlock()
+		cm.forwardToLeader(command)
+		return true
+	}
+}
+
+// becomes a floower ans changes its state
+func (cm *ConsensusModule) becomeFollower(term int64) {
+	// log.Printf("Become follower with term = %v, log = %v", term, cm.log)
+	cm.state = Follower
+	cm.currentTerm = term
+	cm.votedFor = -1
+	cm.electionResetEvent = time.Now()
+	log.Printf("Became follower. Starting the election timer.")
+	go cm.runElectionTimer()
+}
+
+// Stop stops this CM, cleaning up its state. This method returns quickly, but
+// it may take a bit of time (up to ~election timeout) for all goroutines to
+// exit.
+func (cm *ConsensusModule) Stop() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.state = Dead
+	log.Printf("becomes Dead")
+	close(cm.newCommitReadyChan)
+}
+
+// func which checks the last applied entry and sends the remaining
+// entries to the commitchannel
 func (cm *ConsensusModule) commitChanSender() {
 	for {
 		<-cm.newCommitReadyChan
@@ -828,18 +529,406 @@ func (cm *ConsensusModule) commitChanSender() {
 
 }
 
+// once the commit chan sender comes up with the entries that need to be commited
+// commit the entries
 func (cm *ConsensusModule) commitEntries() {
 	for {
-		log.Printf("It is in the CommitEntries function")
+		log.Printf("CommitEntries function waits for entries.")
 		entry := <-cm.commitChan
 		cm.server.persistData(entry)
 	}
 }
-func intMin(a, b int) int {
-	if a < b {
-		return a
+
+// helper function for the RequestVote RPC
+func (cm *ConsensusModule) RequestVoteHelper(req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	reply := &pb.RequestVoteResponse{}
+	if cm.state == Dead {
+		return reply, nil
 	}
-	return b
+	lastLogIndex, LastLogTerm := cm.lastLogIndexAndTerm()
+	//if a term received is greater than the current term..become a follower
+	if req.Term > cm.currentTerm {
+		// log.Printf("Current term out of date..")
+		cm.becomeFollower(req.Term)
+	}
+
+	//if term matches
+	//if cm didnot vote for any candidate yet..vote
+	//if already voted..ignore
+	if cm.currentTerm == req.Term &&
+		(cm.votedFor == -1 || cm.votedFor == req.CandidateId) &&
+		(req.LastLogTerm > LastLogTerm ||
+			(req.LastLogTerm == LastLogTerm && req.LastLogIndex >= lastLogIndex)) {
+		reply.VoteGranted = true
+		cm.votedFor = req.CandidateId
+		cm.electionResetEvent = time.Now()
+	} else {
+		reply.VoteGranted = false
+	}
+
+	reply.Term = cm.currentTerm
+	cm.persistToStorage()
+	return reply, nil
+}
+
+// helper function for ForwardLeader RPC
+func (cm *ConsensusModule) ForwardLeaderHelper(req *pb.ForwardLeaderRequest) (*pb.ForwardLeaderResponse, error) {
+	reply := &pb.ForwardLeaderResponse{}
+	if cm.state == Dead {
+		return reply, nil
+	}
+
+	log.Printf("Received the forwarded Command from other peer.")
+
+	reply.Success = false
+	//if cm is leader of is progressing with localraft
+	if cm.state == Leader || cm.localraft {
+		log.Printf("I'm the leader/virtual leader. Processing the Request.")
+		if cm.Submit(req.Command) {
+			reply.Success = true
+			reply.LeaderId = cm.id
+		}
+		//if the cm is not leader . reply with correct leader id
+	} else {
+		log.Printf("I'm not the Leader. Sending back the correct leader info")
+		reply.Success = false
+		reply.LeaderId = cm.leaderid
+	}
+
+	return reply, nil
+}
+
+// helper function for AppendEntries RPC
+// executed by followers
+func (cm *ConsensusModule) AppendEntriesHelper(req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	reply := &pb.AppendEntriesResponse{}
+	if cm.state == Dead {
+		return reply, nil
+	}
+	//update the current leader details
+	cm.leaderid = req.LeaderId
+
+	//if a term received is greater than the current term..become a follower
+	if req.Term > cm.currentTerm {
+		cm.becomeFollower(req.Term)
+	}
+	reply.Success = false
+	if req.Term == cm.currentTerm {
+		//it may happen that two leaders exists in same term..make later as follower
+		if cm.state != Follower {
+			cm.becomeFollower(req.Term)
+		}
+		cm.electionResetEvent = time.Now()
+
+		//Does our log contains an Entry at PrevLogIndex whose term matches
+		if req.PrevLogIndex == -1 ||
+			(int(req.PrevLogIndex) < len(cm.log) && req.PrevLogTerm == cm.log[req.PrevLogIndex].Term) {
+			reply.Success = true
+			//find an insertion point - where theres a term mismatch between
+			//the existing log starting at PrevLogIndex+1 and the new entries sent in the RPC
+			logInsertIndex := req.PrevLogIndex + 1
+			newEntriesIndex := 0
+			for {
+				if int(logInsertIndex) >= len(cm.log) || newEntriesIndex >= len(req.Entries) {
+					break
+				}
+				if cm.log[logInsertIndex].Term != req.Entries[newEntriesIndex].Term {
+					break
+				}
+				logInsertIndex++
+				newEntriesIndex++
+			}
+			//by the end of the loop:
+			// - logInsertIndex points to the end of the log, or an index
+			//where the term mismatches with an entry from the leader
+			// -newEntriesIndex points to the End of the entries, or an index
+			//where the term mismatches with the corresponding log entry
+			if newEntriesIndex < len(req.Entries) {
+				cm.log = append(cm.log[:logInsertIndex], req.Entries[newEntriesIndex:]...)
+			}
+
+			//set commit index
+			if req.LeaderCommit > cm.commitIndex {
+				cm.commitIndex = int64(intMin(int(req.LeaderCommit), len(cm.log)-1))
+				log.Printf("setting commitIndex=%d", cm.commitIndex)
+				cm.newCommitReadyChan <- 1
+			}
+		}
+	}
+
+	reply.Term = cm.currentTerm
+	cm.persistToStorage()
+	return reply, nil
+}
+
+// followers diverting the client requests to the leader
+func (cm *ConsensusModule) forwardToLeader(command *pb.Command) {
+	if cm.state != Leader {
+		go func() {
+
+			args := &pb.ForwardLeaderRequest{
+				Command: command,
+			}
+			var reply pb.ForwardLeaderResponse
+			cm.mu.Lock()
+			//if no quorum, send the request to lower peer Id server.
+			peerid := cm.leaderid
+			if cm.localraft {
+				peerid = cm.server.activepeerIds[0]
+			}
+
+			cm.mu.Unlock()
+			log.Printf("As I'm not the leader, forwarding to leader server %v", peerid)
+			err := cm.server.peerClients[peerid].Invoke(context.Background(), "/chat.RaftService/ForwardLeader", args, &reply)
+			if err == nil {
+				if reply.Success {
+					log.Printf("Success forwarding the request to leader")
+					cm.newCommitReadyChan <- int64(1)
+				} else {
+					//if sent to wrong server, forward to right leader.
+					cm.leaderid = reply.LeaderId
+					cm.forwardToLeader(command)
+				}
+			}
+		}()
+	}
+}
+
+// helper function for GetTempLogs RPC
+func (cm *ConsensusModule) GetTempLogsHelper(req *pb.MergeRequest) (*pb.MergeResponse, error) {
+	reply := &pb.MergeResponse{}
+	if cm.state == Dead {
+		return reply, nil
+	}
+	log.Printf("Received a Merge Request from leader. Checking if any temp log to merge.")
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	//update the leader
+	cm.leaderid = req.Leaderid
+	//get the lowest server id connected peer.
+	lowestpeerIdnumber := cm.id
+	for _, peerid := range cm.server.activepeerIds {
+		if lowestpeerIdnumber > peerid {
+			lowestpeerIdnumber = peerid
+		}
+	}
+	//if I am the lowest, submit my temp log to leader to merge.
+	if cm.localraft && lowestpeerIdnumber == cm.id {
+		log.Printf("I am the lowest server Id peer. Sending my temp log to leader")
+		reply.Entries = cm.templog
+		reply.IsTempLog = true
+		//if active peer have the lowest server Id, it might have already sent the temp log
+		//as both the logs are identical.Ignore this request.
+	} else {
+		log.Printf("My peer have the lowest server id. Ignoring the merge request")
+		reply.IsTempLog = false
+	}
+	//close the local raft to shift back to raft mode.
+	cm.closeLocalRaft()
+	return reply, nil
+
+}
+
+func (cm *ConsensusModule) SendLocalAEsHelper(req *pb.LocalAERequest) (*pb.LocalAEResponse, error) {
+	reply := &pb.LocalAEResponse{}
+	if cm.state == Dead {
+		return reply, nil
+	}
+	log.Printf("Got the Local AE from my virtual leader. Processing it")
+	//directly append the log
+	cm.templog = append(cm.templog, req.Entries...)
+	//get the commit index
+	savedtempcommitindex := cm.tempcommitindex
+	commitentries := cm.templog[savedtempcommitindex:]
+	log.Printf("Entries to be committed to local raft: %v ", commitentries)
+	for _, entry := range commitentries {
+		cm.tempcommitchan <- CommitEntry{
+			Command: entry.Command,
+			Index:   cm.tempcommitindex,
+			Term:    cm.currentTerm,
+		}
+		cm.tempcommitindex++
+	}
+	reply.Success = true
+	return reply, nil
+
+}
+
+// func to merge all the temp logs from other peers, when there was no leader.
+// this way we can progress with no quorum
+func (cm *ConsensusModule) MergeTempLogs() {
+	log.Printf("Merging all the temp logs from the peers")
+	templogslist := make([][]*pb.LogEntry, 6)
+	cm.mu.Lock()
+	templogslist[cm.id] = cm.templog
+	cm.mu.Unlock()
+	//send GetTempLogs RPC to all the peers and get their templogs if any.
+	for _, peerId := range cm.peerIds {
+		go func(peerId int64) {
+			args := &pb.MergeRequest{
+				Leaderid: cm.id,
+			}
+			var reply pb.MergeResponse
+			err := cm.server.peerClients[peerId].Invoke(context.Background(), "/chat.RaftService/GetTempLogs", args, &reply)
+			if err == nil {
+				if reply.IsTempLog {
+					log.Printf("Received a temp log from %v", peerId)
+					templogslist[peerId] = reply.Entries
+				}
+			}
+		}(peerId)
+	}
+	//append all the temp logs to raft log
+	cm.mu.Lock()
+	for _, templogs := range templogslist {
+		cm.log = append(cm.log, templogs...)
+	}
+	log.Printf("Merged raft log : %v", cm.log)
+	cm.mu.Unlock()
+
+	//once the templogs are collected, close local raft
+	//to switch back to raft mode.
+	cm.closeLocalRaft()
+
+}
+
+// when no leader, we initialize the local raft mode which ensure progress
+// and eventual consistency
+func (cm *ConsensusModule) InitialiseLocalRaft() {
+	go cm.tempcommitEntries()
+	//get the latest state of the raft
+	cm.tempstorage.tempdiskstore = cm.storage.diskstore
+	//initialise templog and commit index
+	cm.templog = make([]*pb.LogEntry, 0)
+	cm.tempcommitindex = 0
+
+	log.Printf("Local Raft succesfully initialised")
+	cm.localraft = true
+
+	//if there is one more server connected to it
+	//if this is the smaller server id . Then behave as a virtual leader
+	go func() {
+		// Immediately send AEs to peers.
+		cm.SendLocalAEs()
+		for {
+			doSend := false
+			ok := <-cm.triggerLocalAEChan
+			if ok == 1 {
+				doSend = true
+			} else {
+				return
+			}
+			if doSend {
+				log.Printf("Sending local AE's")
+				cm.SendLocalAEs()
+			}
+		}
+	}()
+
+}
+
+// in local raft mode, when 1 more peer is connected
+// this func sends the templog from the lowest server id peer to another.
+// this ensures consistency between both the peers.
+func (cm *ConsensusModule) SendLocalAEs() {
+	cm.mu.Lock()
+	tempcommmitindex := cm.tempcommitindex
+	cm.mu.Unlock()
+	activepeers := cm.server.GetActivePeers()
+	if len(activepeers) > 0 && activepeers[0] > cm.id {
+		log.Printf("Active peer is connected %v", activepeers[0])
+		ni := cm.nexttempindex
+		// pick logs which are not present in peer templog.
+		entries := cm.templog[ni:]
+		log.Printf("Entries to send to peer : %v", entries)
+		args := &pb.LocalAERequest{
+			Entries:     entries,
+			Commitindex: tempcommmitindex,
+			Nextindex:   ni,
+		}
+		var reply pb.AppendEntriesResponse
+		err := cm.server.peerClients[activepeers[0]].Invoke(context.Background(), "/chat.RaftService/LocalAEs", args, &reply)
+		if err == nil {
+			log.Printf("sent the localAE to follower. received success")
+			cm.nexttempindex = ni + int64(len(entries))
+		}
+	}
+	//commit the latest entries
+	entries := cm.templog[tempcommmitindex:]
+	log.Printf("Entries that need to be commited  %v", entries)
+	for i, entry := range entries {
+		cm.tempcommitchan <- CommitEntry{
+			Command: entry.Command,
+			Index:   tempcommmitindex + int64(i) + 1,
+			Term:    cm.currentTerm,
+		}
+	}
+	//update the temp log commit index
+	cm.tempcommitindex = int64(int(cm.tempcommitindex) + len(entries))
+	log.Printf("New Entries commited to temp storage")
+}
+
+// function to commit entries in temp storage
+func (cm *ConsensusModule) tempcommitEntries() {
+	for {
+		log.Printf("Temp CommitEntries function waits for temp commits.")
+		entry := <-cm.tempcommitchan
+		cm.server.persistTempData(entry)
+	}
+}
+
+// close the local raft instance
+func (cm *ConsensusModule) closeLocalRaft() {
+	log.Printf("Closing the local raft as leader is Elected. Switching back to raft mode")
+	cm.localraft = false
+	cm.commitIndex = 0
+	cm.nexttempindex = 0
+}
+
+// server the client with the group details based on the mode of cm
+func (cm *ConsensusModule) GetGroup(groupname string) *pb.Group {
+	//if local raft mode is on, serve from the temp storage
+	if cm.localraft {
+		log.Printf("Fetching the group details from the temp storage..")
+		group, _ := cm.tempstorage.GetGroup(groupname)
+		return group
+	} else {
+		log.Printf("Fetching the group details from the raft storage..")
+		group, _ := cm.storage.GetGroup(groupname)
+		return group
+	}
+}
+
+// restores the persistant state of this CM from storage
+func (cm *ConsensusModule) restoreFromStorage() {
+	term, votedFor, logs := cm.storage.GetState()
+	cm.currentTerm = term
+	cm.votedFor = votedFor
+	cm.log = logs
+	log.Printf("State Restored succesfully from the storage")
+}
+
+// Saves all the CM's persistant state
+func (cm *ConsensusModule) persistToStorage() {
+	//in local raft mode, persist to temp storage
+	if cm.localraft {
+		err := cm.tempstorage.SetState(cm.currentTerm, cm.votedFor, cm.log)
+		if err == nil {
+			log.Printf("State successFully temp persisted in the term %v", cm.currentTerm)
+			return
+
+		}
+		//in raft mode, persist to raft storage.
+	} else {
+		err := cm.storage.SetState(cm.currentTerm, cm.votedFor, cm.log)
+		if err == nil {
+			return
+		}
+	}
 }
 
 // lastLogIndexAndTerm returns the last log index and the last log entry's term
@@ -854,144 +943,10 @@ func (cm *ConsensusModule) lastLogIndexAndTerm() (int64, int64) {
 	}
 }
 
-// restores the persistant state of this CM from storage
-func (cm *ConsensusModule) restoreFromStorage() {
-
-	term, votedFor, logs := cm.storage.GetState()
-	cm.currentTerm = term
-	cm.votedFor = votedFor
-	cm.log = logs
-	log.Printf("State Restored succesfully from the storage")
-}
-
-// Saves all the CM's persistant state
-func (cm *ConsensusModule) persistToStorage() {
-	// log.Printf("Trying to persist data1..")
-	err := cm.storage.SetState(cm.currentTerm, cm.votedFor, cm.log)
-	if err == nil {
-		return
-		// log.Printf("State successFully persisted in the term %v", cm.currentTerm)
+// helper minimum function
+func intMin(a, b int) int {
+	if a < b {
+		return a
 	}
-
-}
-
-// Saves all the CM's persistant state
-func (cm *ConsensusModule) persistToTempStorage() {
-	log.Printf("Trying to persist tempdata1..")
-	err := cm.tempstorage.SetState(cm.currentTerm, cm.votedFor, cm.log)
-	if err == nil {
-		log.Printf("State successFully temp persisted in the term %v", cm.currentTerm)
-		return
-
-	}
-
-}
-func (cm *ConsensusModule) tempcommitEntries() {
-	for {
-		log.Printf("It is in the Temp CommitEntries function")
-		entry := <-cm.tempcommitchan
-		cm.server.persistTempData(entry)
-	}
-}
-
-func (cm *ConsensusModule) pullRaftState() {
-
-	cm.tempstorage.tempdiskstore = cm.storage.diskstore
-	// cm.tempstorage.templog = cm.storage.replicatedlog
-
-	log.Printf("Complete raft status is pulled to temp successfully")
-
-}
-
-func (cm *ConsensusModule) InitialiseLocalRaft() {
-	go cm.tempcommitEntries()
-	//get the latest state of the raft
-	cm.pullRaftState()
-	//initialise templog
-	cm.templog = make([]*pb.LogEntry, 0)
-	cm.tempcommitindex = 0
-
-	log.Printf("Local Raft succesfully initialised")
-
-	cm.localraft = true
-
-	//if there is one more server connected to it
-	//if this is the smaller server id . Then behanve as a virtual leader
-
-	go func(heartbeatTimeout time.Duration) {
-		// Immediately send AEs to peers.
-
-		t := time.NewTimer(heartbeatTimeout)
-		defer t.Stop()
-		for {
-			doSend := false
-			ok := <-cm.triggerLocalAEChan
-			if ok == 1 {
-				// log.Printf("AE channnel triggered..")
-				doSend = true
-			} else {
-				return
-			}
-
-			if doSend {
-				// If this isn't a leader any more, stop the heartbeat loop.
-				log.Printf("Received a send local AE's request. Serving")
-				cm.SendLocalAEs()
-			}
-		}
-	}(50 * time.Millisecond)
-
-}
-
-func (cm *ConsensusModule) SendLocalAEs() {
-	cm.mu.Lock()
-	tempcommmitindex := cm.tempcommitindex
-
-	// log.Printf("sending AppendEntries to %v: ni=%d, args=%+v", peerId, ni, args)
-	cm.mu.Unlock()
-	activepeers := cm.server.GetActivePeers()
-	log.Printf("Active peers : %v", activepeers)
-	if len(activepeers) > 0 && activepeers[0] > cm.id {
-		ni := cm.nexttempindex
-		// pick logs which are not present in peer templog.
-		entries := cm.templog[ni:]
-		log.Printf("Testing1 %v", entries)
-		args := &pb.LocalAERequest{
-			Entries:     entries,
-			Commitindex: tempcommmitindex,
-			Nextindex:   ni,
-		}
-		// log.Printf("Found a peer to whom we need to submit the localAE")
-		var reply pb.AppendEntriesResponse
-		err := cm.server.peerClients[activepeers[0]].Invoke(context.Background(), "/chat.RaftService/LocalAEs", args, &reply)
-		if err == nil {
-			log.Printf("sent the localAE to follower. received success")
-			cm.nexttempindex = ni + int64(len(entries))
-		}
-	}
-	entries := cm.templog[tempcommmitindex:]
-	log.Printf("Testing2 %v", entries)
-	for i, entry := range entries {
-
-		cm.tempcommitchan <- CommitEntry{
-			Command: entry.Command,
-			Index:   tempcommmitindex + int64(i) + 1,
-			Term:    cm.currentTerm,
-		}
-	}
-	cm.tempcommitindex = int64(int(cm.tempcommitindex) + len(entries))
-	log.Printf("Appended into the temp log successfully")
-
-}
-
-func (cm *ConsensusModule) GetGroup(groupname string) *pb.Group {
-
-	if cm.localraft {
-		log.Printf("Fetcing the group details from the temporary storage..")
-		group, _ := cm.tempstorage.GetGroup(groupname)
-		return group
-	} else {
-		group, _ := cm.storage.GetGroup(groupname)
-		return group
-	}
+	return b
 }
