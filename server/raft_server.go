@@ -82,14 +82,6 @@ func (s *Server) DisconnectAll() {
 	}
 }
 
-// shutdown the server and waits for it to shutdown gracefully
-func (s *Server) shutdown() {
-	// s.cm.Stop()
-	close(s.quit)
-	s.listener.Close()
-	// s.wg.Wait()
-}
-
 func (s *Server) GetListenAddr() net.Addr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
