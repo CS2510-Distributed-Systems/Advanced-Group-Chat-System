@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"syscall"
 
 	// "os"
 	"strconv"
@@ -99,7 +100,7 @@ func (client *ChatServiceClient) ServerView() {
 		log.Println("cannot Logout.Please Try again")
 	}
 	peerservers := resp.Peerservers
-	log.Printf("Client is currently connected to server%v whose peer servers are %v", client.serverId, peerservers)
+	log.Printf("Client is currently connected to server %v whose peer servers are %v", client.serverId, peerservers)
 }
 
 // Biirectional rpc
@@ -368,7 +369,7 @@ func logError(err error) error {
 
 func (client *ChatServiceClient) ConnectionHealthCheck(conn *grpc.ClientConn) {
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, os.Interrupt, syscall.SIGABRT, syscall.SIGALRM, syscall.SIGBUS, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGILL, syscall.SIGTRAP, syscall.SIGSEGV)
 	go func() {
 		<-c
 		client.UserLogout()

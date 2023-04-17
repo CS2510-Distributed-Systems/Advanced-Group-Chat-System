@@ -266,6 +266,7 @@ func (cm *ConsensusModule) startElection() {
 					if reply.VoteGranted {
 						votesReceived += 1
 						if votesReceived*2 > len(cm.peerIds)+1 {
+							//won the election
 							go cm.startLeader()
 							return
 						}
@@ -303,6 +304,7 @@ func (cm *ConsensusModule) startLeader() {
 		t := time.NewTimer(heartbeatTimeout)
 		defer t.Stop()
 		log.Printf("Leader is starts heart beats..")
+		log.Printf("Leader starts heart beats..")
 		for {
 			doSend := false
 			select {
@@ -378,7 +380,9 @@ func (cm *ConsensusModule) leaderSendAEs() {
 				defer cm.mu.Unlock()
 
 				//if reply term exceeded become follower
-				if reply.Term > cm.currentTerm {
+				//or if no quorum in the system
+				cm.server.activepeerIds = cm.server.GetActivePeers()
+				if reply.Term > cm.currentTerm || len(cm.server.activepeerIds) < 2 {
 					cm.becomeFollower(reply.Term)
 					return
 				}
@@ -483,6 +487,7 @@ func (cm *ConsensusModule) becomeFollower(term int64) {
 	cm.votedFor = -1
 	cm.electionResetEvent = time.Now()
 	log.Printf("Became follower. Starting the election timer.")
+	// log.Printf("Becomes follower. Starting the election timer.")
 	go cm.runElectionTimer()
 }
 
@@ -705,8 +710,6 @@ func (cm *ConsensusModule) GetTempLogsHelper(req *pb.MergeRequest) (*pb.MergeRes
 		return reply, nil
 	}
 	log.Printf("Received a Merge Request from leader. Checking if any temp log to merge.")
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
 	//update the leader
 	cm.leaderid = req.Leaderid
 	//get the lowest server id connected peer.
@@ -748,11 +751,13 @@ func (cm *ConsensusModule) SendLocalAEsHelper(req *pb.LocalAERequest) (*pb.Local
 	for _, entry := range commitentries {
 		cm.tempcommitchan <- CommitEntry{
 			Command: entry.Command,
-			Index:   cm.tempcommitindex,
+			Index:   cm.tempcommitindex + 1,
 			Term:    cm.currentTerm,
 		}
 		cm.tempcommitindex++
 	}
+	log.Printf("my tempcommitindex changed to %v", cm.tempcommitindex)
+
 	reply.Success = true
 	return reply, nil
 
@@ -811,24 +816,44 @@ func (cm *ConsensusModule) InitialiseLocalRaft() {
 
 	//if there is one more server connected to it
 	//if this is the smaller server id . Then behave as a virtual leader
-	go func() {
+	go func(heartbeatTimeout time.Duration) {
 		// Immediately send AEs to peers.
 		cm.SendLocalAEs()
+		t := time.NewTimer(heartbeatTimeout)
+		defer t.Stop()
+		log.Printf("Local send AE's start")
 		for {
 			doSend := false
-			ok := <-cm.triggerLocalAEChan
-			if ok == 1 {
+			select {
+			case <-t.C:
 				doSend = true
-			} else {
-				return
+
+				// Reset timer to fire again after heartbeatTimeout.
+				t.Stop()
+				t.Reset(heartbeatTimeout)
+			case ok := <-cm.triggerLocalAEChan:
+				if ok == 1 {
+					doSend = true
+				} else {
+					return
+				}
+
+				// Reset timer for heartbeatTimeout.
+				if !t.Stop() {
+					<-t.C
+				}
+				t.Reset(heartbeatTimeout)
 			}
+			//if any of the above case is true
 			if doSend {
-				log.Printf("Sending local AE's")
+				if !cm.localraft {
+					return
+				}
 				cm.SendLocalAEs()
+
 			}
 		}
-	}()
-
+	}(2000 * time.Millisecond)
 }
 
 // in local raft mode, when 1 more peer is connected
@@ -837,17 +862,19 @@ func (cm *ConsensusModule) InitialiseLocalRaft() {
 func (cm *ConsensusModule) SendLocalAEs() {
 	cm.mu.Lock()
 	tempcommmitindex := cm.tempcommitindex
+	log.Printf("tempcommitindex : %v", tempcommmitindex)
 	cm.mu.Unlock()
 	activepeers := cm.server.GetActivePeers()
 	if len(activepeers) > 0 && activepeers[0] > cm.id {
 		log.Printf("Active peer is connected %v", activepeers[0])
 		ni := cm.nexttempindex
 		// pick logs which are not present in peer templog.
+		log.Printf("ni : %v", ni)
 		entries := cm.templog[ni:]
 		log.Printf("Entries to send to peer : %v", entries)
 		args := &pb.LocalAERequest{
 			Entries:     entries,
-			Commitindex: tempcommmitindex,
+			Commitindex: tempcommmitindex + 1,
 			Nextindex:   ni,
 		}
 		var reply pb.AppendEntriesResponse
@@ -868,8 +895,11 @@ func (cm *ConsensusModule) SendLocalAEs() {
 		}
 	}
 	//update the temp log commit index
-	cm.tempcommitindex = int64(int(cm.tempcommitindex) + len(entries))
-	log.Printf("New Entries commited to temp storage")
+	if len(entries) > 0 {
+		log.Printf("New Entries commited to temp storage")
+		log.Printf("my tempcommitindex %v", cm.tempcommitindex)
+	}
+
 }
 
 // function to commit entries in temp storage
@@ -885,7 +915,7 @@ func (cm *ConsensusModule) tempcommitEntries() {
 func (cm *ConsensusModule) closeLocalRaft() {
 	log.Printf("Closing the local raft as leader is Elected. Switching back to raft mode")
 	cm.localraft = false
-	cm.commitIndex = 0
+	cm.tempcommitindex = 0
 	cm.nexttempindex = 0
 }
 

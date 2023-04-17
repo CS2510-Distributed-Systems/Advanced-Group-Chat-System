@@ -685,3 +685,10 @@ func (store *TempDiskStore) UnLikeMessage(unlikemessage *pb.UnLikeMessage) {
 
 	}
 }
+
+func (store *TempDiskStore) EraseTempStorage() {
+	store.tempdiskstore.DropAll()
+	store.templog.DropAll()
+	log.Printf("Erased the temp storage")
+}
+
