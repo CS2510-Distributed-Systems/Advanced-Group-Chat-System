@@ -251,7 +251,7 @@ func (cm *ConsensusModule) startElection() {
 				defer cm.mu.Unlock()
 				//when other RV calls received a majority, then election might have already been done
 				if cm.state == Leader {
-					cm.startLeader()
+					go cm.startLeader()
 					return
 				}
 				if cm.state == Follower {
