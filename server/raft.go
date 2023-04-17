@@ -896,6 +896,7 @@ func (cm *ConsensusModule) SendLocalAEs() {
 	}
 	//update the temp log commit index
 	if len(entries) > 0 {
+		cm.tempcommitindex = int64(int(cm.tempcommitindex) + len(entries))
 		log.Printf("New Entries commited to temp storage")
 		log.Printf("my tempcommitindex %v", cm.tempcommitindex)
 	}
